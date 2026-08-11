@@ -1,0 +1,46 @@
+{
+  "name": "app-v2",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "preview": "npx --yes serve out",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test:keys": "tsx scripts/keycheck.mts",
+    "test:auth": "tsx scripts/authcheck.mts",
+    "test:boundary": "node scripts/boundarycheck.mjs",
+    "test": "npm run test:keys && npm run test:auth && npm run test:boundary",
+    "probe:turnkey": "tsx scripts/turnkeyprobe.mts"
+  },
+  "dependencies": {
+    "@gsap/react": "^2.1.2",
+    "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.8.0",
+    "@scure/base": "^1.2.6",
+    "@zkpassport/poseidon2": "^0.6.2",
+    "clsx": "^2.1.1",
+    "gsap": "^3.15.0",
+    "next": "16.2.12",
+    "qr": "^0.6.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "^16.2.12",
+    "eslint-plugin-import": "^2.32.0",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.5",
+    "typescript": "^5"
+  },
+  "overrides": {
+    "postcss": "^8.5.25"
+  }
+}

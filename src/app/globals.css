@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+/**
+ * Palette from cowl/STYLE.md, which is the canon. Dark only on purpose: this app
+ * has one look and there is no light mode to fall back to, so no
+ * prefers-color-scheme switching.
+ *
+ * `acid` is the single accent. `acid2` is the lighter tone, and it is what the
+ * mark itself is drawn in.
+ */
+@theme {
+  /**
+   * True black, not near black. Every page background is this one token, so the
+   * home screen and the login screen cannot drift apart: change it here or not
+   * at all. `ink2` is the well an input or a secondary button sits in, `card` is
+   * the raised surface above the page.
+   */
+  --color-ink: #000000;
+  --color-ink2: #1c1c1f;
+  --color-card: #141416;
+  --color-bone: #ececE7;
+  --color-acid: #d7fb08;
+  --color-acid2: #e6ff52;
+
+  /**
+   * The mark's own green, taken from the Figma export rather than the palette.
+   * It sits between `acid` and `acid2` and is not either of them, so it gets its
+   * own token instead of quietly redefining a canon colour. If this is meant to
+   * become the new `acid`, that is a change to cowl/STYLE.md first.
+   */
+  --color-mark: #c9fa01;
+
+  /**
+   * The primary action colour · the mark's own green.
+   *
+   * It was the login mock's blue while the question was open. The answer is that
+   * an app with one accent should spend it on the thing it wants pressed, and a
+   * second accent that appears only on buttons reads as a component borrowed
+   * from another product. Pointing this at `mark` rather than restating the hex
+   * keeps one source: change the mark and every action follows.
+   *
+   * `acid2` is the hover because it is already the palette's lighter tone of the
+   * same colour. A bright fill cannot darken on hover without reading as
+   * disabled, so it brightens.
+   */
+  --color-primary: var(--color-mark);
+  --color-primary-hi: var(--color-acid2);
+
+  /**
+   * What goes **on** the primary fill, and it is not a style preference.
+   *
+   * `mark` has a relative luminance of about 0.81, so white text on it lands at
+   * a contrast ratio of 1.22:1 · under WCAG's 4.5:1 floor by a factor of four,
+   * and unreadable rather than merely poor. Near black on the same fill is about
+   * 17:1. Any new control filled with `primary` takes this for its text, and a
+   * `text-white` that survives beside a `bg-primary` is a bug rather than a
+   * variation.
+   */
+  --color-on-primary: var(--color-ink);
+
+  /**
+   * The refusal colour, and a deliberate reversal.
+   *
+   * `cowl/STYLE.md` gives this world one accent, and `login-card.tsx` argued
+   * against an alarm colour: on a card where the message is the only thing that
+   * moved, brighter bone is already the loudest element. That held while the
+   * only failure was a build with no credentials. It stopped holding once sign
+   * in grew failures a person has to act on, and the user's call on 2026-08-10
+   * is that a refusal should read as a refusal before it is read as a sentence.
+   *
+   * It lives here rather than as a literal in the component, so the reversal is
+   * one edit to undo · the same arrangement `--color-primary` already has.
+   *
+   * `#ff6b6b` rather than a true red: about 7:1 on `card`, which clears WCAG's
+   * 4.5:1 floor, where a saturated `#ff0000` lands near 5:1 and reads as a
+   * console error rather than as part of this palette.
+   */
+  --color-danger: #ff6b6b;
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html,
+body {
+  background: var(--color-ink);
+  color: var(--color-bone);
+}
+
+/** House rule: every link and button is a pointer, no exceptions. */
+a,
+button,
+[role="button"] {
+  cursor: pointer;
+}
+
+/**
+ * The entrance one screen makes when it replaces another.
+ *
+ * Scoped inside the media query rather than being disabled by a second rule, so
+ * under reduced motion the class does nothing at all. That distinction matters
+ * because of the fill mode: an animation that is cancelled but still filling
+ * would hold the element at its first keyframe, which here is invisible, and
+ * the people who asked for less movement would get a blank screen instead of a
+ * still one.
+ *
+ * **`backwards`, not `both`, and the difference is load bearing.** A filling
+ * animation that ever touches transform keeps counting as a transform after it
+ * finishes, and an element with a transform is the containing block for every
+ * `fixed` descendant — so with `both`, this wrapper quietly re-based every
+ * dialog's `inset-0` onto the page's own box and modals centred on the
+ * content's height instead of the screen. `backwards` fills only before the
+ * animation starts (the invisible first frame, which is the part we need) and
+ * releases the element entirely once it ends. The overlays are also portalled
+ * to `body` and would survive either way; this keeps the wrapper honest for
+ * whatever fixed element arrives next.
+ */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rise {
+    animation: rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+}
