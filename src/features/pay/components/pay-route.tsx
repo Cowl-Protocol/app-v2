@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { decodeRequest } from "@/lib/request-link";
-import { IS_PLACEHOLDER, KNOWN_TOKENS, SAMPLE_REQUEST } from "../lib/placeholder";
+import { IS_PLACEHOLDER, SAMPLE_REQUEST } from "../lib/placeholder";
 import { resolveRequest } from "../lib/resolve";
 import { PayRefused, PayScreen } from "./pay-screen";
 
@@ -53,7 +53,7 @@ export function PayRoute() {
     payment address · are questions about this deployment rather than about the
     string.
   */
-  const resolved = resolveRequest(payload, KNOWN_TOKENS);
+  const resolved = resolveRequest(payload);
   if (typeof resolved === "string") return <PayRefused reason={resolved} />;
 
   return <PayScreen request={resolved} sample={sample} />;

@@ -21,7 +21,24 @@ import type { Asset } from "../types";
  * have to line up down the column.
  */
 
-export function AssetTable({ assets, hidden }: { assets: Asset[]; hidden: boolean }) {
+export function AssetTable({
+  assets,
+  hidden,
+  reading = false,
+}: {
+  assets: Asset[];
+  hidden: boolean;
+  /**
+   * The chain is still being read.
+   *
+   * Its own state, and not a variation on empty. "Nothing here yet" is an
+   * instruction to a new account and a lie to somebody whose money simply has
+   * not been counted yet, and the second reading is the one that arrives at the
+   * worst moment: a balance that renders as nothing before the scan lands is
+   * indistinguishable from a balance that is gone.
+   */
+  reading?: boolean;
+}) {
   const priced = assets.map((a) => ({ a, usd: usdValue(a.balance, a.decimals, a.price) }));
   const total = priced.reduce((n, r) => n + (r.usd ?? 0), 0);
   const rows = [...priced].sort((x, y) => (y.usd ?? 0) - (x.usd ?? 0));
@@ -39,7 +56,7 @@ export function AssetTable({ assets, hidden }: { assets: Asset[]; hidden: boolea
       className="h-full min-w-0"
     >
       {rows.length === 0 ? (
-        <Empty />
+        reading ? <Reading /> : <Empty />
       ) : (
         <ul className="divide-y divide-white/[0.05] border-t border-white/[0.05]">
           {rows.map(({ a, usd }) => (
@@ -90,6 +107,18 @@ function ShareBar({ pct }: { pct: number }) {
         style={{ width: `${Math.max(pct, 1.5)}%` }}
       />
     </span>
+  );
+}
+
+function Reading() {
+  return (
+    <div className="border-t border-white/[0.05] px-4 py-10 text-center">
+      <p className="text-[13px] text-bone/55">Reading the chain.</p>
+      <p className="mx-auto mt-1.5 max-w-[34ch] text-[12px] text-bone/35">
+        Nothing about this account is stored between visits, so the whole book is
+        rebuilt each time you sign in.
+      </p>
+    </div>
   );
 }
 

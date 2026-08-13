@@ -1,9 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { DEFAULT_NETWORK, NETWORKS, PREVIEW } from "@/config";
+import { Alert } from "@/components/ui/alert";
+import { ACTIVE_NETWORK, PREVIEW } from "@/config";
 import { ReceiveCard } from "@/features/request";
-import { SendOverlay, SwapOverlay } from "@/features/shielded";
+import { SendOverlay, SwapOverlay, useShieldedBook } from "@/features/shielded";
+import { toAssets } from "../lib/holdings";
 import { ACTIVITY, ARRIVING, ASSETS, STATUS, TRACE } from "../lib/placeholder";
 import { ActivityPanel } from "./activity-panel";
 import { ArrivalStrip } from "./arrival-strip";
@@ -57,7 +59,20 @@ export function HomeScreen() {
   const [receiveFlash, setReceiveFlash] = useState(false);
   const receiveRef = useRef<HTMLDivElement>(null);
   const flashTimer = useRef<number | undefined>(undefined);
-  const network = NETWORKS[DEFAULT_NETWORK];
+  const book = useShieldedBook();
+
+  /*
+    Three sources, and the middle one is the point.
+
+    A signed in session renders what the chain says it holds. `locked` is the
+    layout case, `SKIP_LOGIN` with no account behind it, and it keeps the
+    placeholder so a screen can still be worked on. **Everything else renders
+    nothing**, deliberately: while a scan is in flight or after it failed, the
+    placeholder would be four invented balances sitting exactly where four real
+    ones go, and nobody looking at them could tell.
+  */
+  const assets =
+    book.state === "ready" ? toAssets(book.holdings) : book.state === "locked" ? ASSETS : [];
 
   function onAction(verb: Verb) {
     if (verb === "Send") setDialog("send");
@@ -98,6 +113,24 @@ export function HomeScreen() {
           </div>
         )}
 
+        {/*
+          A scan that failed, said out loud and at the top.
+
+          The alternative is a screen that reads as an empty account, and the
+          two are worth distinguishing in the strongest terms available: one
+          means nothing has arrived yet, the other means this client could not
+          find out. Only the second one is worth a person's attention, and it is
+          the one that would otherwise look calm.
+        */}
+        {book.state === "failed" && (
+          <div className="lg:col-span-12">
+            <Alert>
+              Your balance could not be read from the chain, so nothing on this
+              screen is a complete picture. Reload to try again · {book.reason}
+            </Alert>
+          </div>
+        )}
+
         <div className="lg:col-span-8">
           <BalancePanel
             points={TRACE}
@@ -115,7 +148,7 @@ export function HomeScreen() {
         </div>
 
         <div className="lg:col-span-8">
-          <AssetTable assets={ASSETS} hidden={hidden} />
+          <AssetTable assets={assets} hidden={hidden} reading={book.state === "scanning"} />
         </div>
 
         <div className="lg:col-span-4">
@@ -128,10 +161,10 @@ export function HomeScreen() {
       </div>
 
       {dialog === "send" && (
-        <SendOverlay mode="send" chainId={network.chainId} onClose={() => setDialog(null)} />
+        <SendOverlay mode="send" chainId={ACTIVE_NETWORK.chainId} onClose={() => setDialog(null)} />
       )}
       {dialog === "pay" && (
-        <SendOverlay mode="pay" chainId={network.chainId} onClose={() => setDialog(null)} />
+        <SendOverlay mode="pay" chainId={ACTIVE_NETWORK.chainId} onClose={() => setDialog(null)} />
       )}
       {dialog === "swap" && <SwapOverlay onClose={() => setDialog(null)} />}
     </div>

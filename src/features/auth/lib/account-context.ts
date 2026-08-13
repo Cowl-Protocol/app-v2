@@ -65,10 +65,20 @@ export function useSignOut(): () => void {
  * The wallet address is not here either. It is not a secret, but it is the one
  * address in this product that must never appear on chain, and a screen that can
  * read it is a screen that can render it.
+ *
+ * **The payment address is here, and it is the opposite case.** It is derived
+ * from the keys, but it holds no secret and it exists to be published: it is the
+ * string a user hands a stranger to get paid. Keeping it behind the key boundary
+ * would put a public value under the strictest rule in the app, and the first
+ * screen that needed it would widen `KEY_CONSUMERS` to reach it, undoing the rule
+ * the product rests on for the sake of something already meant to be on a QR
+ * code. Same reasoning that puts `@/lib/payment-address` outside `features/keys`.
  */
-export function useAccount(): { email: string } | null {
+export function useAccount(): { email: string; paymentAddress: string } | null {
   const account = useContext(AccountContext);
-  return account ? { email: account.email } : null;
+  return account
+    ? { email: account.email, paymentAddress: account.keys.paymentAddress }
+    : null;
 }
 
 /**

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { DEFAULT_NETWORK, NETWORKS, PREVIEW } from "@/config";
+import { ACTIVE_NETWORK, PREVIEW } from "@/config";
+import { useAccount } from "@/features/auth";
 import {
   CURRENT,
   FUNNEL,
@@ -59,26 +60,44 @@ const SAMPLE_RECEIPT: TokenAmount = {
 export function ReceiveCard() {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [tab, setTab] = useState<ReceiveTab>("cowl");
-  const network = NETWORKS[DEFAULT_NETWORK];
+  const account = useAccount();
 
   const tabs = <ReceiveTabs active={tab} onSelect={setTab} />;
+
+  /*
+    The first real thing on this screen.
+
+    A signed in session derives its own `zcowl1…`, so the panel shows that one
+    and the SAMPLE tag comes off, because the address is genuinely payable and
+    the money genuinely arrives. Without a session, which is every `SKIP_LOGIN`
+    render, it falls back to the placeholder that is built from a fixed phrase
+    and stays labelled as a sample.
+
+    **No retired addresses, and that is the truth rather than a stub.** One
+    session derives one account today. The one-time sequence needs per-index
+    derivation, which does not exist yet, and printing "4 previous addresses"
+    beside a real address would be inventing a history this account has not got.
+  */
+  const live = account
+    ? { index: 0, address: account.paymentAddress, issued: "Current", holdings: [] }
+    : null;
 
   return (
     <>
       {tab === "cowl" ? (
         <ReceivePanel
-          address={CURRENT}
-          retiredCount={RETIRED.length}
+          address={live ?? CURRENT}
+          retiredCount={live ? 0 : RETIRED.length}
           justReceived={PREVIEW === "paid" ? SAMPLE_RECEIPT : undefined}
           onRequest={() => setDialog("request")}
           onOpenAddresses={() => setDialog("addresses")}
           tabs={tabs}
-          sample={IS_PLACEHOLDER}
+          sample={live ? false : IS_PLACEHOLDER}
         />
       ) : (
         <FunnelPanel
           funnel={FUNNEL}
-          networkLabel={network.label}
+          networkLabel={ACTIVE_NETWORK.label}
           onRequest={() => setDialog("request")}
           tabs={tabs}
           sample={IS_PLACEHOLDER}
@@ -96,8 +115,8 @@ export function ReceiveCard() {
           */
           address={NEXT}
           tokens={REQUEST_TOKENS}
-          chainId={network.chainId}
-          networkLabel={network.label}
+          chainId={ACTIVE_NETWORK.chainId}
+          networkLabel={ACTIVE_NETWORK.label}
           onClose={() => setDialog(null)}
           sample={IS_PLACEHOLDER}
         />

@@ -8,19 +8,15 @@
  * A codec that knew the network table would be a codec that had to change every
  * time a contract moved.
  */
-import { NETWORKS, type Network } from "@/config";
+import { NETWORKS, tokenOn, type Network } from "@/config";
 import { dustFloor } from "@/lib/denominations";
 import { toBaseUnits } from "@/lib/format";
 import { isPaymentAddress } from "@/lib/payment-address";
 import type { RequestPayload } from "@/lib/request-link";
 import type { PayRefusal, ResolvedRequest } from "../types";
 
-/** Symbol to decimals. Stands in for reading the token itself. */
-export type TokenTable = Record<string, number>;
-
 export function resolveRequest(
   payload: RequestPayload,
-  tokens: TokenTable,
 ): ResolvedRequest | PayRefusal {
   /**
    * The chain check, which is the one that stops real money going to a
@@ -31,6 +27,11 @@ export function resolveRequest(
    * is the only thing that can name the chain, and a payer surface that does not
    * refuse an unrecognised one is a surface that will pay a testnet request with
    * mainnet funds and show nothing unusual while doing it.
+   *
+   * Checked against every network this build knows rather than the one it runs
+   * on. A build aimed at one chain still has to read a link naming the other,
+   * or the refusal it gives is "this app does not know that network" when the
+   * truth is that it knows it perfectly well and cannot pay there.
    */
   const network = Object.values(NETWORKS).find(
     (n: Network) => n.chainId === payload.chain,
@@ -42,17 +43,27 @@ export function resolveRequest(
   // signing time that the destination was mistyped is finding out too late.
   if (!isPaymentAddress(payload.to)) return "bad-address";
 
-  const decimals = tokens[payload.token];
-  if (decimals === undefined) return "unknown-token";
+  /*
+    Decimals come from the token registry, on the chain the link names, and a
+    token that is not in it is refused rather than assumed. This used to be a
+    table of four tickers living in the placeholder module beside the sample
+    request, which meant a token whose real decimals differed from the guess
+    would have rendered an amount off by orders of magnitude while looking
+    completely ordinary. The registry ends the guess for what it curates; the
+    read that ends it for everything else is a call to the token itself, and it
+    does not exist yet.
+  */
+  const token = tokenOn(network, payload.token);
+  if (!token) return "unknown-token";
 
-  const amount = toBaseUnits(payload.amount, decimals);
+  const amount = toBaseUnits(payload.amount, token.decimals);
   if (amount <= 0n) return "malformed";
 
   return {
     payload,
     network,
     amount,
-    decimals,
+    decimals: token.decimals,
     /**
      * **Dust warns and never refuses**, which is a deliberate asymmetry with
      * the request side.
@@ -64,6 +75,6 @@ export function resolveRequest(
      * small note is fragmentation on the recipient's side, which is real and
      * is theirs to carry.
      */
-    dust: amount < dustFloor(decimals),
+    dust: amount < dustFloor(token.decimals),
   };
 }

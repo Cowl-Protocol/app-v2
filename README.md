@@ -12,14 +12,16 @@ npm run build      # static export to out/
 npm run preview    # serve out/ the way it will actually be served
 npm run lint       # includes the architecture rules below
 npm run typecheck
-npm test           # key derivation, sign in plumbing, architecture rules. all offline
+npm test           # config, keys, note ciphers, sign in plumbing, architecture rules. all offline
+npm run probe:chain     # can this build reach its chain, and what will each RPC serve
 npm run probe:turnkey   # asks a real Turnkey org the one question the tests cannot
 ```
 
-Sign in needs two public ids. Copy `.env.example` to `.env.local` and fill them
-in. Without them the app still runs and every screen behind the door is still
-reachable with `SKIP_LOGIN`; what you lose is the Google button, which says it
-has no credentials rather than failing at Google's door.
+Copy `.env.example` to `.env.local`. It holds the chain this build runs against
+and the two public ids sign in needs, and nothing in it is a secret. Without the
+ids the app still runs and every screen behind the door is still reachable with
+`SKIP_LOGIN`; what you lose is the Google button, which says it has no
+credentials rather than failing at Google's door.
 
 ## Two decisions that shape everything else
 
@@ -49,6 +51,43 @@ negotiable: a viewing key reads history backwards, so a leak cannot be undone by
 rotating anything. Turnkey protects the EOA key inside an enclave. It cannot
 protect this one, because a ZK proof has to be built where the secret is, and
 that is the browser.
+
+## Which chain a build runs on
+
+`NEXT_PUBLIC_COWL_NETWORK`, one of the keys in `config/networks.ts`. **Left unset
+it is testnet**, and the asymmetry is deliberate: a build that forgot to name a
+network runs against the chain where a mistake costs nothing, and reaching
+mainnet takes somebody typing its name.
+
+**A name this build does not know fails `npm run build`.** The check runs at
+module load, which under `output: "export"` is during prerender, so a typo takes
+the build down instead of falling back. That fallback is the failure worth
+paying a build error to avoid: a build meant for mainnet that quietly landed on
+testnet reads an empty pool, and an empty pool looks exactly like an account
+with no money in it.
+
+`ACTIVE_NETWORK` is the only answer to which chain this build is on, and there is
+one of it. `NETWORKS` stays beside it because the payer's screen asks a different
+question, whether a link names a chain this build knows **at all**, and that one
+has to look past the active network or a testnet request is unreadable in a
+mainnet build rather than refused in words.
+
+**`config/tokens.ts` is where decimals live, per network, and nowhere else.**
+Decimals decide where the point goes, so an entry wrong by one is wrong by a
+factor of ten while rendering perfectly, and nothing downstream can catch it.
+Every value there was read from the deployment it describes, including the
+testnet venue's stand-ins, which are free to differ from the mainnet tokens they
+stand in for. The set is deliberately short: this chain carries tokenized
+equities as plain ERC-20s, so a wired client has to learn a token from the token
+itself, and until that read exists **a token that is not in the registry is
+refused rather than guessed at**.
+
+`npm run test:config` pins all of it, 58 checks. The selection rule is tested
+twice on purpose, once in this process against a value it is handed and once in
+a child process with a real environment variable set, because a pure function
+nothing calls passes every test it has and still ships a build on the wrong
+chain. Addresses are checked against their own EIP-55 checksum, which is what
+catches a hand typo. Six mutants, six killed.
 
 ## One shielded account space, shared with the dapp
 
@@ -184,7 +223,7 @@ src/
   components/ui/   primitives with no domain knowledge (shadcn lands here)
   components/layout/
   lib/             cross cutting helpers
-  config/          networks, contract addresses, constants
+  config/          networks, tokens, contract addresses, constants
   hooks/           generic hooks only
   types/
 ```
