@@ -44,6 +44,7 @@ import { keccak_256 } from "@noble/hashes/sha3";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 import { SHIELDED_SIGN_MESSAGE } from "../src/features/keys";
 import { __unlock } from "../src/features/auth/lib/unlock";
+import { findProbeAccount } from "./probe-wallet.mjs";
 
 const { eip191, assemble, address } = __unlock;
 
@@ -120,27 +121,12 @@ type Activity = {
 async function main() {
   console.log("\nFinding a wallet account to sign with");
 
-  const wallets = await post<{ wallets: { walletId: string; walletName: string }[] }>(
-    "/public/v1/query/list_wallets",
-    { organizationId: ORG },
-  );
-  const wallet = wallets.wallets[0];
-  if (!wallet) {
-    console.error("\nThis organization has no wallet. Create one in the dashboard first.\n");
-    process.exit(1);
-  }
-
-  const accounts = await post<{ accounts: { address: string; path: string }[] }>(
-    "/public/v1/query/list_wallet_accounts",
-    { organizationId: ORG, walletId: wallet.walletId },
-  );
-  const account =
-    accounts.accounts.find((a) => a.path === "m/44'/60'/0'/0/0") ?? accounts.accounts[0];
-  if (!account) {
-    console.error("\nThat wallet has no accounts.\n");
-    process.exit(1);
-  }
-  console.log(`  wallet ${wallet.walletName} · ${account.path} · ${account.address}`);
+  const account = await findProbeAccount({
+    post,
+    organizationId: ORG,
+    walletName: process.env.TURNKEY_WALLET_NAME,
+  });
+  console.log(`  wallet ${account.walletName} · ${account.path} · ${account.address}`);
 
   const message = eip191(SHIELDED_SIGN_MESSAGE);
   const payloadHex = "0x" + bytesToHex(message);

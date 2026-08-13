@@ -12,10 +12,17 @@ npm run build      # static export to out/
 npm run preview    # serve out/ the way it will actually be served
 npm run lint       # includes the architecture rules below
 npm run typecheck
-npm test           # config, keys, note ciphers, sign in plumbing, architecture rules. all offline
+npm test           # config, keys, note ciphers, probe wallet choice, sign in plumbing, architecture rules. all offline
 npm run probe:chain     # can this build reach its chain, and what will each RPC serve
 npm run probe:turnkey   # asks a real Turnkey org the one question the tests cannot
+npm run probe:export    # takes a key out of the enclave. throwaway wallets only
 ```
+
+The two probes talk to a real Turnkey organization and need a parent
+organization API key, which lives on a laptop and never in this app. Set
+`TURNKEY_WALLET_NAME` as well when that organization holds more than one wallet:
+both probes compare bytes against a frozen value, so they refuse to choose a
+subject by position rather than risk reporting on the wrong key.
 
 Copy `.env.example` to `.env.local`. It holds the chain this build runs against
 and the two public ids sign in needs, and nothing in it is a secret. Without the
