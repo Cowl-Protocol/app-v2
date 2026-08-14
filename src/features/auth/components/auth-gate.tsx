@@ -1,21 +1,27 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { Preloader } from "@/components/layout/preloader";
-import { SHOW_PRELOADER, SKIP_LOGIN } from "@/config";
+import { AUTH_CONFIGURED, SHOW_PRELOADER, SKIP_LOGIN } from "@/config";
 import { AccountContext, SignOutContext } from "../lib/account-context";
-import { isSignInError, reportSignInFailure } from "../lib/errors";
-import { forgetSession, signIn, type Account } from "../lib/sign-in";
+import { AuthProvider } from "./auth-provider";
+import { useSignIn } from "../lib/sign-in";
 import { LoginScreen } from "./login-screen";
 
 /**
  * What the one route shows: the entrance, then the door, then the app.
  *
- * **The door is real now.** Pressing Continue with Google opens Google, creates
- * or finds a Turnkey sub-organization, takes a session bound to a key that never
- * leaves this tab, and derives the shielded account from a signature by the
- * wallet inside it. `lib/sign-in.ts` is that sequence in one function and is the
- * file to read; this component only decides which of three screens is on.
+ * **The stage is no longer this component's to own, and that is the provider
+ * change showing through.** It used to hold `login` or `home` in state and move
+ * between them when an awaited `signIn()` returned. Privy signs in by navigating
+ * away, so the browser comes back on a fresh page with a session already
+ * restored and nothing to await · which screen belongs on the glass is a
+ * question about that restored state, and `useSignIn` is what answers it.
+ *
+ * What this component still owns is the preloader, because that is the one piece
+ * of sequencing that is genuinely local: it is an entrance animation, it has no
+ * opinion about who is signed in, and it must not replay on every state change
+ * behind it.
  *
  * **The signed in app arrives as `children` rather than being imported here.**
  * The route composes it and passes it in, so `auth` never reaches for
@@ -23,69 +29,20 @@ import { LoginScreen } from "./login-screen";
  * screen depend on the balance screen, which is backwards and gets worse with
  * every screen added behind it. React only creates those elements at the route,
  * it does not mount them, so nothing behind the door runs before the door opens.
- * The account itself travels by context instead, which is what lets that stay
- * true once the screens behind actually need a balance.
+ * The account itself travels by context instead.
  *
- * Reloading returns to the beginning, and that is the design rather than a gap.
- * The shielded keys are memory only, the Turnkey session key is memory only, so
- * a reload has nothing to restore and no amount of state kept here could change
- * that. The cost is one sign in per tab, which README states as not negotiable.
+ * **A reload no longer returns to the beginning, and that is worth stating
+ * plainly.** With the previous provider nothing survived the tab, so a refresh
+ * was always a full sign in. Privy restores its own session from `localStorage`,
+ * so a refresh lands on `unlocking` and derives the shielded keys again without
+ * asking Google. The keys are still memory only and still die with the tab; what
+ * survives is the ability to derive them again on this device.
  */
-
-type Stage = "preload" | "login" | "home";
-
-/**
- * Computed from constants and never from `window`, so the server and the first
- * client render agree. Reading a media query or a stored value here is the usual
- * way a gate like this starts flickering between two screens on load.
- */
-const FIRST: Stage = SHOW_PRELOADER ? "preload" : SKIP_LOGIN ? "home" : "login";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
-  const [stage, setStage] = useState<Stage>(FIRST);
-  const [account, setAccount] = useState<Account | null>(null);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [entered, setEntered] = useState(!SHOW_PRELOADER);
 
-  const onGoogle = useCallback(async () => {
-    // A second popup while the first is open would leave two flows racing for
-    // one session key, and the loser's token is unspendable.
-    if (pending) return;
-
-    setPending(true);
-    setError(null);
-    try {
-      const next = await signIn();
-      setAccount(next);
-      setStage("home");
-    } catch (err) {
-      reportSignInFailure(err);
-      setError(readable(err));
-    } finally {
-      setPending(false);
-    }
-  }, [pending]);
-
-  /**
-   * Signing out, which is two acts that have to happen together.
-   *
-   * `forgetSession` makes the Turnkey session unusable. Clearing `account` is
-   * what drops the shielded keys, and that is the half that cannot be undone if
-   * it is skipped: the view key reads history backwards and cannot be rotated,
-   * so leaving it live in a tab that says it is signed out is the worst version
-   * of this bug rather than a cosmetic one.
-   *
-   * The stage goes back to `login` and not to `preload`, because the preloader
-   * is an entrance and this is not an arrival.
-   */
-  const onSignOut = useCallback(() => {
-    forgetSession();
-    setAccount(null);
-    setError(null);
-    setStage("login");
-  }, []);
-
-  if (stage === "preload") {
+  if (!entered) {
     return (
       <>
         {/*
@@ -101,23 +58,93 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             enabled.
           </p>
         </noscript>
-        <Preloader onDone={() => setStage(SKIP_LOGIN ? "home" : "login")} />
+        <Preloader onDone={() => setEntered(true)} />
       </>
     );
   }
 
-  if (stage === "login") {
-    // Keyed so the entrance animation runs on arrival rather than on mount of a
-    // component that was already there.
+  /*
+    **An unconfigured build never mounts the provider, and never mounts the
+    component that reads it.** The SDK throws on an empty app id, so the provider
+    has to be skipped · and skipping it while still rendering `Gate` puts every
+    provider hook outside its context. That surfaced as
+    `useWallets was called outside the PrivyProvider component` during a static
+    export, which is a warning today and undefined behaviour on the next release.
+
+    This path is not an edge case. It is the one `SKIP_LOGIN` uses, and it is how
+    every screen behind the door gets worked on without an account.
+  */
+  if (!AUTH_CONFIGURED) return <Unconfigured>{children}</Unconfigured>;
+
+  /*
+    The provider wraps the gate rather than the other way round, because `Gate`
+    reads the session through hooks that need this context above them. Keeping
+    all of it inside one exported component is what leaves the route file
+    unchanged: a route picks the route and hands off, and which vendor holds the
+    keys is not something it should have to name.
+  */
+  return (
+    <AuthProvider>
+      <Gate>{children}</Gate>
+    </AuthProvider>
+  );
+}
+
+/**
+ * A build with no credentials, which is a development shape rather than a
+ * failure.
+ *
+ * Under `SKIP_LOGIN` the app behind the door renders with a null account, which
+ * every consumer already handles · that is what makes layout work possible
+ * without signing in. Otherwise the door is shown with its button inert, and
+ * `LoginCard` says why in words, because a button that fails at the provider's
+ * door with an unreadable page is worse than one that admits it cannot work.
+ */
+function Unconfigured({ children }: { children: React.ReactNode }) {
+  if (SKIP_LOGIN) {
+    return (
+      <div key="home" className="rise flex flex-1 flex-col">
+        {children}
+      </div>
+    );
+  }
+  return (
+    <div key="login" className="rise flex flex-1 flex-col">
+      <LoginScreen onGoogle={() => {}} pending={false} error={null} />
+    </div>
+  );
+}
+
+function Gate({ children }: { children: React.ReactNode }) {
+  const signIn = useSignIn();
+
+  const account = signIn.stage === "ready" ? signIn.account : null;
+
+  if (!account && !SKIP_LOGIN) {
+    /*
+      `loading` and `unlocking` both render the door with its button busy rather
+      than a screen of their own. They are the two halves of a return from
+      Google: the SDK restoring a session, then two signatures deriving the
+      shielded account. Neither is something a person can act on, and a distinct
+      screen for each would flash past on a fast connection and read as a bug on
+      a slow one.
+    */
+    const busy =
+      signIn.pending || signIn.stage === "loading" || signIn.stage === "unlocking";
+
     return (
       <div key="login" className="rise flex flex-1 flex-col">
-        <LoginScreen onGoogle={onGoogle} pending={pending} error={error} />
+        <LoginScreen
+          onGoogle={signIn.begin}
+          pending={busy}
+          error={signIn.stage === "failed" ? signIn.message : null}
+        />
       </div>
     );
   }
 
   return (
-    <SignOutContext.Provider value={onSignOut}>
+    <SignOutContext.Provider value={signIn.signOut}>
       <AccountContext.Provider value={account}>
         <div key="home" className="rise flex flex-1 flex-col">
           {children}
@@ -125,22 +152,4 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       </AccountContext.Provider>
     </SignOutContext.Provider>
   );
-}
-
-/**
- * The sentence the login card shows.
- *
- * Either a message this feature wrote for a person, or one generic line. Never a
- * raw exception: those carry paths, status codes and, on this particular flow,
- * fragments of an identity token.
- *
- * The test is the **type**, not the text. It used to match on the start of the
- * string, and three real failures had copy that could therefore never appear:
- * Google's own error codes, the wallet shape refusal, and a missing session all
- * failed the match and were replaced by the generic line, silently. A type
- * cannot drift out of step with itself. `reason`, the accurate half, goes to the
- * console instead and is what a bug report should quote.
- */
-function readable(err: unknown): string {
-  return isSignInError(err) ? err.message : "Sign in failed. Please try again.";
 }

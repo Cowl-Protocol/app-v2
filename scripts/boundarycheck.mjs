@@ -1,7 +1,8 @@
 /**
  * The architecture rules, tested in both directions. `npm run test:boundary`.
  *
- * README.md claims six rules are enforced by `import/no-restricted-paths`. A
+ * README.md claims six rules are enforced by `import/no-restricted-paths`,
+ * and a seventh keeps the wallet provider behind its port. A
  * lint rule can be wrong in two ways and only one of them is loud:
  *
  *   it fails to block something it should      caught the first time someone
@@ -199,6 +200,36 @@ const CASES = [
     code: `export const save = (v: string) => { document.cookie = "k=" + v; };`,
     why: "a cookie is storage that also travels with every request",
   },
+
+  /*
+    The provider boundary, added 2026-08-14 with the move off Turnkey.
+
+    The swap cost a whole feature because `unlock.ts`, `funnel.ts` and
+    `sign-in.ts` each named the vendor directly, so replacing a provider meant
+    editing the code that derives keys for a reason that had nothing to do with
+    derivation. The rule that stops the next one is only worth having if it is
+    tested in both directions: it caught a real violation in `sign-in.ts` the
+    hour it was written, and an over-blocking version of it would stop the
+    adapter itself from being written at all.
+  */
+  {
+    from: "src/features/portfolio",
+    expect: "block",
+    code: `import { usePrivy } from "@privy-io/react-auth";\nexport const x = usePrivy;`,
+    why: "a screen reaching for the SDK to read a loading flag is how vendor lock in starts",
+  },
+  {
+    from: "src/features/auth/lib",
+    expect: "block",
+    code: `import { useWallets } from "@privy-io/react-auth";\nexport const x = useWallets;`,
+    why: "even inside auth, only the adapter may name the vendor · this is the import that used to be everywhere",
+  },
+  {
+    from: "src/features/auth/lib/providers",
+    expect: "allow",
+    code: `import { usePrivy } from "@privy-io/react-auth";\nexport const x = usePrivy;`,
+    why: "the adapter is the one place the vendor is allowed, and a rule that blocked it here would block the port itself",
+  },
 ];
 
 const written = [];
@@ -261,9 +292,21 @@ for (const [folder, cases] of byFolder) {
     }
     rmSync(path, { force: true });
 
+    /*
+      **The rule ids the architecture is actually made of.** Filtering to these
+      rather than counting any lint error is what stops an unused import or a
+      formatting complaint from reading as a boundary doing its job.
+
+      `no-restricted-imports` joined the list on 2026-08-14 with the provider
+      port. It is worth noting how it announced itself: the two block cases for
+      it failed with "nothing stopped it" while the rule was working perfectly,
+      because a rule missing from this filter is invisible to the very script
+      that exists to prove the rules work.
+    */
     const relevant = messages.filter(
       (m) =>
         m.ruleId === "import/no-restricted-paths" ||
+        m.ruleId === "no-restricted-imports" ||
         m.ruleId === "no-restricted-globals" ||
         m.ruleId === "no-restricted-properties",
     );

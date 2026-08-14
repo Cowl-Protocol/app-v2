@@ -12,23 +12,22 @@ npm run build      # static export to out/
 npm run preview    # serve out/ the way it will actually be served
 npm run lint       # includes the architecture rules below
 npm run typecheck
-npm test           # config, keys, note ciphers, history arithmetic, probe wallet choice, sign in plumbing, architecture rules. all offline
+npm test           # config, keys, note ciphers, history arithmetic, sign in plumbing, architecture rules. all offline
 npm run probe:chain     # can this build reach its chain, and what will each RPC serve
-npm run probe:turnkey   # asks a real Turnkey org the one question the tests cannot
-npm run probe:export    # takes a key out of the enclave. throwaway wallets only
+npm run probe:privy     # asks a real Privy app the two questions the tests cannot
 ```
 
-The two probes talk to a real Turnkey organization and need a parent
-organization API key, which lives on a laptop and never in this app. Set
-`TURNKEY_WALLET_NAME` as well when that organization holds more than one wallet:
-both probes compare bytes against a frozen value, so they refuse to choose a
-subject by position rather than risk reporting on the wrong key.
+`probe:privy` needs a Privy **app secret**, which lives on a laptop and never in
+this app · nothing under `src/` reads it and it is deliberately not a
+`NEXT_PUBLIC_` variable. It answers whether signatures are deterministic and
+whether they are RFC 6979, and **it has to be run before anybody holds a
+balance**. See "The assumption underneath all of it".
 
 Copy `.env.example` to `.env.local`. It holds the chain a session opens on
-and the two public ids sign in needs, and nothing in it is a secret. Without the
+and the public ids sign in needs, and nothing in it is a secret. Without the
 ids the app still runs and every screen behind the door is still reachable with
 `SKIP_LOGIN`; what you lose is the Google button, which says it has no
-credentials rather than failing at Google's door.
+credentials rather than failing at the provider's door.
 
 ## Two decisions that shape everything else
 
@@ -44,20 +43,31 @@ here. An API route quietly turns this back into a server and takes the guarantee
 with it.
 
 Sub-organization creation used to be the known example, and as of 2026-08-08 it
-is not: Turnkey's managed auth proxy holds the parent key, so the browser calls
-it directly and there is nothing left for a service of ours to do. Which is the
+is not: the wallet provider holds the parent credential and the browser talks to
+it directly, so there is nothing left for a service of ours to do. Which is the
 better outcome twice over, because that service would have seen every user's
 identity token and therefore their email. **There is currently nothing in this
 product that needs a server**, and the bar for the first thing that does should
 be read as higher than it looks.
 
-**Secrets are never persisted.** Shielded keys are derived on demand, held in
+**Shielded secrets are never persisted.** They are derived on demand, held in
 memory, and die with the tab. No `localStorage`, no `sessionStorage`, no
-IndexedDB, no cookie. This costs one auth step per session and it is not
-negotiable: a viewing key reads history backwards, so a leak cannot be undone by
-rotating anything. Turnkey protects the EOA key inside an enclave. It cannot
-protect this one, because a ZK proof has to be built where the secret is, and
-that is the browser.
+IndexedDB, no cookie, and eslint blocks all four anywhere under `src/`. A
+viewing key reads history backwards, so a leak cannot be undone by rotating
+anything. The provider protects the EOA key inside its TEE. It cannot protect
+this one, because a ZK proof has to be built where the secret is, and that is
+the browser.
+
+**One half of that rule was lost on 2026-08-14 and it should not be discovered
+later as a regression.** The previous provider's session was a non-extractable
+key in a module variable, so nothing at all survived the tab. Privy signs in by
+redirecting, which means its session has to survive a page load, and its web SDK
+keeps that token in `localStorage` with no supported way to move it · there is no
+`storage` prop on `PrivyProvider` and no persistence option in
+`PrivyClientConfig`. So the shielded keys still die with the tab, and **the
+ability to derive them again now survives on the user's own device** until they
+sign out. `useSignOut` clears it, which is why signing out matters more than it
+used to.
 
 ## Which chain a session reads
 
@@ -165,7 +175,7 @@ app's whole shape exists to avoid.
 
 `SHIELDED_SIGN_MESSAGE` in `features/keys` is **byte-identical** to the dapp's.
 Same wallet, same signature, same `mpk`, same `zcowl1…`, whichever client is
-holding it. Turnkey can export the EOA key, and an export that hands someone a
+holding it. A provider can export the EOA key, and an export that hands someone a
 key whose shielded balance then does not appear in the dapp is an export in name
 only.
 
@@ -183,108 +193,125 @@ between a wallet prompt that names the wrong host and two shielded balances per
 wallet. Nobody has decided; shared account space is the current default because
 it is the one a user can reason about.
 
-**One thing about that sentence changed when Turnkey landed.** In the dapp it is
-an anti-phishing control that works, because MetaMask renders it and a human
-reads it before approving. Here nobody ever sees it: the signature is produced
-inside an enclave, on request, with no prompt. The control is not weakened so
+**One thing about that sentence changed when a hosted provider landed.** In the
+dapp it is an anti-phishing control that works, because MetaMask renders it and a
+human reads it before approving. Here nobody ever sees it: the signature is
+produced inside a TEE, on request, with no prompt. The control is not weakened so
 much as absent, and what replaces it is narrower and stronger for this app. A
-hostile origin cannot make Turnkey sign anything, because signing needs a session
-minted from a Google token bound to our client id and our proxy config. The risk
-comes back the moment a user exports the key into an injected wallet, which is
-exactly where the original warning starts working again.
+hostile origin cannot make the provider sign anything, because signing needs a
+session minted for our app id against an origin allowlist. The risk comes back
+the moment a user exports the key into an injected wallet, which is exactly where
+the original warning starts working again.
 
 ## Sign in
 
-Google, through Turnkey, with no server of ours anywhere in it.
+Google, through Privy, with no server of ours anywhere in it.
 
 ```
-click  ->  P-256 keypair, non-extractable, in memory
-       ->  Google, nonce = sha256(that public key), popup
-       ->  Turnkey auth proxy: find or create the sub-organization
-       ->  Turnkey auth proxy: token + public key -> session
-       ->  wallet account m/44'/60'/0'/0/0 signs the unlock message
+click  ->  the provider redirects to Google. this page is gone
+       ->  Google  ->  back to this origin, a fresh page
+       ->  the provider reports ready and authenticated
+       ->  a signer appears, once the keyring has an account at index 0
+       ->  m/44'/60'/0'/0/0 signs the unlock message, twice
        ->  shielded keys, derived in this tab
 ```
+
+**The second half runs on a page load rather than on a click**, which is why
+`lib/sign-in.ts` is a hook and not the single awaited function it used to be.
+Nothing can be sequenced after the login call, because that call navigates the
+page away.
 
 **Account 0 signs and never appears on chain. Account 1 is the deposit
 address.** The anchor's whole job is that signature, and an anchor seen receiving
 in public ties a transfer to the account a shielded balance derives from.
-`features/auth/lib/funnel.ts` derives index 1 on demand, through Turnkey, inside
-the enclave, and nothing about it is stored here.
+`features/auth/lib/funnel.ts` derives index 1 on demand, inside the provider's
+TEE, and nothing about it is stored here. Both indices are named constants in
+`lib/signer.ts` rather than literals at call sites.
 
-**No server, still.** Sub-organization creation needs the parent organization's
-API key, and until Turnkey shipped a managed auth proxy that meant running a
-small service to hold one. It no longer does. That is better than convenient: a
+**No server, still.** The provider holds the credential that provisions an
+account and the browser talks to it directly. That is better than convenient: a
 service of ours in this path would see every user's identity token, which carries
 their email, and no box of ours being able to learn that is the whole point of
-`output: "export"`. The proxy moves the secret to the party that already holds
-the account.
+`output: "export"`.
 
-**No SDK, either.** `@turnkey/core` keeps the session keypair in IndexedDB and
-its storage layer is not optional; `@turnkey/react-wallet-kit` arrives with a UI
-framework, an icon set, an animation player and a phone number parser. The whole
-surface used here is six HTTP calls, so `features/auth/lib/turnkey.ts` makes them
-directly and this feature adds **zero dependencies**. That is a deliberate answer
-to the audit note in the workspace handoff: the build machine turns dependencies
-into the bundle where a signature becomes a spending key, which is the shortest
-path in this project from a bad package to somebody's money.
+**The SDK is a real cost and it was taken deliberately.** Auth used to be six
+`fetch` calls and **zero packages**, which was the answer to the audit note that
+the build machine turns dependencies into the bundle where a signature becomes a
+spending key · the shortest path in this project from a bad package to somebody's
+money. `@privy-io/react-auth` brings roughly forty direct dependencies, including
+a styling engine, two icon sets and two wallet connector stacks, and the install
+took this project from 317 packages to 543. It was traded for a price model that
+matches how this app actually behaves, and it is written down here as a trade
+rather than left to be found later. One thing that does not get worse: Privy pins
+the same viem this app already had, so there is no second copy of it.
 
-**The popup is forced, not chosen.** Google's nonce commits to the session public
-key, so the private half has to survive the round trip. A redirect ends the page,
-and this app persists nothing, so the token would come back unspendable. Storing
-the key across the hop is the one thing the no-persistence rule exists to refuse.
-`/auth/callback` is the popup's landing page and does nothing but hand the token
-to its opener.
+**Only two files may name the vendor**, `lib/providers/` and
+`components/auth-provider.tsx`, and a lint rule enforces it rather than a
+convention · see rule 7 below.
+
+**The provider is behind a port.** `lib/signer.ts` defines `ShieldedSigner` and
+`WalletSession`, `lib/providers/privy.ts` implements them, and
+`lib/providers/index.ts` is the one line that chooses. That exists because the
+last swap cost a whole feature: `unlock.ts`, `funnel.ts` and `sign-in.ts` each
+imported the vendor directly, so replacing it meant editing the code that derives
+keys for a reason that had nothing to do with derivation.
 
 ### The assumption underneath all of it
 
-The shielded account is derived from the bytes of one signature. That works
-because deterministic ECDSA gives the same bytes every time, which every injected
-wallet does and **Turnkey has never said whether it does**. A search of the
-published docs, the whitepaper and the whole `tkhq/sdk` monorepo on 2026-08-08
-found no mention of RFC 6979 or of nonce generation. Hedged signing, deterministic
-plus fresh entropy, is a normal choice for enclave signers and would break this
-design silently: a different account every session, a balance reading zero, notes
-addressed to keys nothing will derive again.
+The shielded account is derived from the bytes of one signature. That rests on
+two properties, **neither of which any hosted provider has put on the public
+record**, and they fail in different sizes.
 
-So `lib/unlock.ts` signs **twice on every unlock and refuses if the two differ**,
-along with checking that the signature recovers to the wallet's own address and
-that `s` is on the low half of the curve. Each of those failures is otherwise
-silent and looks exactly like theft. `npm run probe:turnkey` answers the same
-question against a real organization in about five seconds, and **it has to be
-run before anybody holds a balance**, because a sign in that always refuses is
-safe but is not a product.
+**Determinism.** If the provider signs with a random nonce, every session derives
+a different shielded account: a balance reading zero, notes addressed to keys
+nothing will derive again. Hedged signing, deterministic plus fresh entropy, is a
+normal choice for a TEE signer. This one is **loud** · `lib/unlock.ts` signs
+twice on every unlock and refuses if the two differ, so nobody loses money, they
+just cannot sign in.
 
-Still open and not answerable from the probe: whether these are the same bytes
-viem would produce for the same private key. Determinism alone does not settle
-it, since a deterministic nonce that is not RFC 6979 would be stable here and
-still differ in an injected wallet. It decides whether export means anything, so
-it belongs with the export flow rather than before it.
+**RFC 6979.** A deterministic nonce that is not RFC 6979 would be perfectly
+stable here and produce **different bytes than viem** for the same key. Accounts
+would be reproducible in this app and **fork from the dapp**, one wallet would
+open two different shielded balances depending on which client held it, and an
+exported key would open the wrong one in MetaMask. This one is **silent**. Two
+signatures in one session agree happily. Nothing observable from inside a browser
+distinguishes it from the correct world.
+
+`lib/unlock.ts` also checks that the signature recovers to the wallet's own
+address and that `s` is on the low half of the curve. Each of those failures is
+otherwise silent and looks exactly like theft.
+
+**`npm run probe:privy` is what answers both**, and it has to be run before
+anybody holds a balance. It signs four times with a provider-generated wallet for
+determinism, then imports a key generated locally and compares the provider's
+signature against noble's own RFC 6979 output byte for byte. Freeze the wallet id
+and the `r` it prints and re-run on another day: determinism inside one session
+cannot see a scheme that changed between sessions.
 
 ### Setting it up, once
 
 Neither account exists yet. Both are free and neither touches a chain.
 
-1. **Turnkey.** Create an organization, then Embedded Wallets · Configuration.
-   Copy the **Auth Proxy Config ID**. Allowlist the origin this app is served
-   from, exactly, since partial wildcards are not supported. Enable Google, and
-   **turn off every method you are not using**: email OTP left on is a second
-   door into the same shielded account, and a weaker one than the Google account
-   it sits beside.
-2. **Google.** Cloud Console · Credentials · OAuth 2.0 Client ID, type Web
-   application. Authorised JavaScript origin `http://localhost:3000`, authorised
-   redirect URI `http://localhost:3000/auth/callback`. Google compares strings,
-   so scheme, port and trailing slash all have to match what the browser sends.
-3. Put both ids in `.env.local`, then `npm run probe:turnkey` before trusting any
-   of it with a balance.
+Only one account, and it is free.
 
-Two things that would break this from outside the app. `Cross-Origin-Opener-Policy:
-same-origin` on the web server severs `window.opener` and takes sign in with it,
-so a hardening pass has to leave that header alone. And the static export writes
-`out/auth/callback.html`, not `out/auth/callback/index.html`, which is the same
-trap `/pay` already carries: Caddy needs `try_files {path} {path}.html`, or
-`trailingSlash: true` fixes it everywhere and moves the address to
-`/auth/callback/`, which then has to be re-registered with Google.
+1. **Privy.** Create an app in the dashboard. Copy the **App ID**, and the
+   **Client ID** from App settings · Clients. Allowlist the origin this app is
+   served from, exactly.
+2. **Turn every login method off except Google.** A second method is a second
+   door into the same shielded account, and the weakest one sets the strength of
+   all of them: anything that can authenticate as the user can derive the view
+   key, which reads payment history backwards and cannot be rotated. The client
+   config in `components/auth-provider.tsx` also names `loginMethods: ["google"]`,
+   and **the two have to agree** · a method enabled in the dashboard and omitted
+   there is still reachable.
+3. Put the ids in `.env.local`, then `npm run probe:privy` before trusting any of
+   it with a balance. That needs the app secret as well, in the shell only.
+
+Google needs no separate project: the provider owns that integration. The
+`/auth/callback` route the previous popup flow needed is gone, and with it the
+`Cross-Origin-Opener-Policy` trap · that header severed `window.opener` and is
+now harmless. `/pay` still emits `out/pay.html` rather than an index file, so
+Caddy still needs `try_files {path} {path}.html`.
 
 ## Where code goes
 
@@ -292,7 +319,7 @@ trap `/pay` already carries: Caddy needs `try_files {path} {path}.html`, or
 src/
   app/             routes only, thin shells
   features/        the actual app, one folder per domain
-    auth/          Google sign in, the Turnkey session, key derivation trigger
+    auth/          Google sign in, the provider session, key derivation trigger
     keys/          secret material. the only place it exists
     shielded/      notes, tree sync, proving
     pay/           paying into someone else's shielded balance
@@ -310,9 +337,9 @@ A feature owns its own `components/`, `hooks/`, `lib/` and `types.ts`, and
 exposes exactly one public file, `index.ts`. Everything not exported there is
 free to move, rename or disappear without touching another feature.
 
-## The six rules
+## The seven rules
 
-Five of these are enforced in `eslint.config.mjs`. A convention people have to
+Six of these are enforced in `eslint.config.mjs`. A convention people have to
 remember is a convention that erodes, so these fail `npm run lint` instead.
 
 1. **`app/` is routing only.** A file under `app/` picks the route and hands off
@@ -330,6 +357,12 @@ remember is a convention that erodes, so these fail `npm run lint` instead.
    secret in process to prove. Nothing else has a reason, and a reason that turns
    up later is a design conversation rather than a quick import. *Enforced, plus
    a second rule that blocks browser storage anywhere under `src/`.*
+7. **The wallet provider is named in two files and nowhere else.**
+   `features/auth/lib/providers/` and `features/auth/components/auth-provider.tsx`
+   may import the SDK. Everything else uses the `ShieldedSigner` and
+   `WalletSession` ports in `features/auth/lib/signer.ts`. *Enforced.* It caught
+   a real violation in `sign-in.ts` within an hour of being written, which is
+   roughly how long the previous provider's imports took to spread.
 
 Adding a feature means adding its folder **and** its name to `FEATURES` in
 `eslint.config.mjs`. A folder missing from that list silently escapes rule 3.
@@ -337,9 +370,15 @@ Adding a feature means adding its folder **and** its name to `FEATURES` in
 ### They are tested in both directions
 
 `npm run test:boundary` writes a probe file into each folder, lints it, deletes
-it, and asserts twenty two cases. Fifteen must be blocked and seven **allowed**,
-and an allow that errors fails the script exactly as loudly as a block that
-passes.
+it, and asserts twenty five cases. Seventeen must be blocked and eight
+**allowed**, and an allow that errors fails the script exactly as loudly as a
+block that passes.
+
+One further trap that suite set for itself: it filters lint output down to the
+rule ids the architecture is made of, so a **new rule missing from that filter is
+invisible to the script that exists to prove the rules work**. The provider rule
+was working perfectly and reported as "nothing stopped it" until the filter
+learned its name.
 
 That second half is not symmetry for its own sake. A lint rule that over-blocks
 looks identical to a lint rule that works, right up until the feature that needs

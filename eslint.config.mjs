@@ -176,6 +176,47 @@ const eslintConfig = defineConfig([
     },
   },
 
+  {
+    /**
+     * **The wallet provider has one door into this app.**
+     *
+     * `features/auth/lib/providers/` implements the `ShieldedSigner` port and
+     * `features/auth/components/auth-provider.tsx` mounts the SDK's context.
+     * Those two files may name the vendor. Nothing else may, and this rule is
+     * what makes that true rather than remembered.
+     *
+     * The reason is not tidiness, it is the cost of the last swap. Turnkey was
+     * imported directly by `unlock.ts` and `funnel.ts`, so replacing a provider
+     * meant editing the code that derives keys · the most dangerous code here ·
+     * for a reason that had nothing to do with derivation. Every import that
+     * reaches past the port puts that cost back.
+     *
+     * It bites the plausible shortcuts first: a screen wanting `usePrivy()` for
+     * a loading flag, or a feature reaching for `useWallets()` rather than
+     * asking the signer.
+     */
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: [
+      "src/features/auth/lib/providers/**",
+      "src/features/auth/components/auth-provider.tsx",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@privy-io/*"],
+              message:
+                "Only features/auth/lib/providers may name the wallet provider. " +
+                "Everything else uses the ShieldedSigner port in features/auth/lib/signer.ts.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts"]),
 ]);
 

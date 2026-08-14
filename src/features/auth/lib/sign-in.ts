@@ -1,137 +1,211 @@
+"use client";
+
 /**
- * Sign in, end to end, as one function.
+ * Sign in, as one hook.
  *
- * The order below is the whole design, and every step is here rather than spread
- * across a provider so that what this app hands to whom can be read in one
- * screen. Nothing is written to disk at any point.
+ * **The shape of this file changed with the provider and the reason is worth
+ * knowing.** It used to be a single imperative `signIn()`: open a popup, get a
+ * token, take a session, sign, derive, return an account, all inside one click
+ * handler. That worked because the whole round trip happened in a window beside
+ * a page that never unloaded.
  *
- *   1. A P-256 keypair is generated in this tab. The private half is
- *      non-extractable and never leaves WebCrypto.
- *   2. Google is asked for an identity token whose `nonce` commits to that
- *      public key. The token comes back through a popup, in a fragment, so it
- *      never appears in a request line.
- *   3. Turnkey's auth proxy is asked whether this Google identity already has a
- *      sub-organization, and creates one with a wallet if not.
- *   4. The token is exchanged for a session bound to the keypair from step 1.
- *   5. The wallet's first account signs the shielded unlock message, and the
- *      shielded keys are derived from those bytes in this tab.
+ * The current provider signs in by **navigating away**. Its login call is a
+ * redirect, Google returns the browser to this origin, and the app boots from
+ * nothing with a session the provider has already restored. So there is no call
+ * to await: the second half of sign in runs on a page load that did not start
+ * with a click, and the only thing that can express that is state.
  *
- * **What the network sees.** Google learns that someone signed into our client
- * id, which is what signing in with Google means. Turnkey learns the identity
- * and holds the Ethereum key. Neither learns the shielded keys, which are
- * derived in step 5 from a signature that is never sent anywhere, and no server
- * of ours is in the path at all.
+ *   click  ->  session.begin()  ->  the page is gone
+ *          ->  Google  ->  back to this origin, a fresh page
+ *          ->  the provider reports ready and authenticated
+ *          ->  a signer appears, once the anchor at HD index 0 exists
+ *          ->  that account signs the unlock message, twice
+ *          ->  shielded keys, derived in this tab
+ *
+ * **What the network sees.** Google learns that someone signed into our app,
+ * which is what signing in with Google means. The provider learns the identity
+ * and holds the Ethereum key. Neither learns the shielded keys, which are derived in
+ * the last step from a signature that is never sent anywhere, and no server of
+ * ours is in the path at all.
+ *
+ * **What is written to disk, and it is a real change.** The current provider
+ * keeps its auth token in `localStorage` and its web SDK offers no way to put it
+ * anywhere else.
+ * That token outlives the tab, so a browser profile can re-derive the shielded
+ * keys without going back to Google. The keys themselves are still memory only
+ * and still die with the tab · what persists is the ability to derive them
+ * again, and only on the user's own device. `useSignOut` clears it, which is why
+ * signing out matters more here than it did before.
  */
-import { SignInError } from "./errors";
-import { deriveLabel } from "./identity";
-import { completeGoogleSignIn, openSignInWindow } from "./google";
-import { clearSessionKey, createSessionKey } from "./session-key";
-import {
-  createSubOrg,
-  findSubOrg,
-  oauthLogin,
-  openWallet,
-  readSession,
-  SIGNING_PATH,
-  type Session,
-  type WalletAccount,
-} from "./turnkey";
-import { unlockShieldedAccount } from "./unlock";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ShieldedKeys } from "@/features/keys";
+import { isSignInError } from "./errors";
+import { useWalletSession } from "./providers";
+import type { ShieldedSigner } from "./signer";
+import { unlockShieldedAccount } from "./unlock";
 
 export type Account = {
-  session: Session;
   /** The Ethereum address the shielded account derives from. Never shown, never published. */
-  address: string;
+  address: `0x${string}`;
   /**
-   * The wallet the account lives on, and every account already derived on it.
+   * The live signer, kept so a receiving address can be issued later.
    *
-   * Carried from sign in rather than re-read later, because the one thing that
-   * needs it is issuing a receiving address, and listing the wallet again to do
-   * that would risk answering from a different wallet than the one this session
-   * was opened against. `openWallet` refuses an ambiguous answer; the way to
-   * keep that guarantee is to ask once.
+   * It holds no secret · it is a handle on a provider session that can ask for a
+   * signature or an address while the tab is open. The shielded keys beside it
+   * are the secret, and they are the reason this record never leaves the feature
+   * whole. See `account-context.ts`.
    */
-  wallet: { id: string; accounts: WalletAccount[] };
+  signer: ShieldedSigner;
   keys: ShieldedKeys;
   /** Only for the account control in the top bar. The address and the email stay off screen. */
   email: string;
 };
 
-export async function signIn(): Promise<Account> {
-  // **First statement, and nothing may be awaited before it.** A browser only
-  // permits `window.open` while it still counts as inside the click that caused
-  // it, and every `await` above this line spends that. Chrome keeps the
-  // activation alive long enough to hide the mistake. Safari blocks the popup.
-  //
-  // This works from an async click handler because the body of an async
-  // function runs synchronously up to its own first await, so `signIn()` is
-  // still inside the handler's call stack when this line executes.
-  const popup = openSignInWindow();
+/**
+ * Where sign in has got to.
+ *
+ * `loading` covers two states a user cannot tell apart and should not have to:
+ * the SDK is booting, and the browser has just come back from Google. Both are
+ * "wait", and both end at the same place.
+ */
+export type SignInState =
+  | { stage: "loading" }
+  | { stage: "signed-out" }
+  /** Authenticated, and deriving the shielded account. Two signatures happen here. */
+  | { stage: "unlocking" }
+  | { stage: "ready"; account: Account }
+  | { stage: "failed"; message: string };
 
-  try {
-    const publicKey = await createSessionKey();
-    const idToken = await completeGoogleSignIn(popup, publicKey);
-    const { email, label } = deriveLabel(idToken);
+export type SignIn = SignInState & {
+  /** Start the redirect. There is nothing to await · the page goes away. */
+  begin: () => void;
+  /** Drop the provider session and the shielded keys together. */
+  signOut: () => void;
+  /** True while the redirect is being started, so the button can say so. */
+  pending: boolean;
+};
 
-    // Look up first, create only if absent. Signing up an existing user would
-    // be refused by Turnkey anyway, but the refusal reads as a failure rather
-    // than as a returning user, which is what most sign ins are.
-    if (!(await findSubOrg(idToken))) {
-      await createSubOrg({ oidcToken: idToken, label });
-    }
+export function useSignIn(): SignIn {
+  const session = useWalletSession();
+  const { ready, authenticated, email, signer, problem, begin: start, starting, end } = session;
 
-    const session = readSession(await oauthLogin({ oidcToken: idToken, publicKey }));
+  const [account, setAccount] = useState<Account | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
-    const wallet = await openWallet(session);
-    const signing = wallet.accounts.find((a) => a.path === SIGNING_PATH);
-    if (!signing) {
-      // Reachable only if a wallet was created outside this code, which today
-      // means a dashboard default. Guessing at another account here would derive
-      // a shielded account that the next release would not find again.
-      throw new SignInError(
-        "This account's wallet is not in the shape this app expects, so it cannot " +
-          "be opened safely. Nothing was changed.",
-        `wallet has no account at ${SIGNING_PATH}, found ${wallet.accounts.map((a) => a.path).join(", ")}`,
-      );
-    }
+  /**
+   * Which anchor address has already been unlocked.
+   *
+   * A ref rather than state because it must be true the instant it is set: this
+   * gate stops a second unlock, and an unlock is two signatures. A state update
+   * would not land until the next render and the effect would run again first,
+   * which on a metered provider is real money and on any provider is a user
+   * waiting twice.
+   */
+  const unlocked = useRef<string | null>(null);
 
-    const keys = await unlockShieldedAccount({ session, signWith: signing.address });
-    return {
-      session,
-      address: signing.address,
-      wallet: { id: wallet.walletId, accounts: wallet.accounts },
-      keys,
-      email,
+  /**
+   * Everything after the redirect, which is where the real work is.
+   *
+   * It runs on a page load rather than on a click, so it has to be idempotent
+   * and it has to tolerate arriving before the provider has finished restoring
+   * the session. Waiting on `signer` covers all of that in one condition: it is
+   * null until somebody is signed in and their keyring has an anchor.
+   */
+  useEffect(() => {
+    if (!signer) return;
+    if (unlocked.current === signer.anchorAddress) return;
+
+    let live = true;
+    unlocked.current = signer.anchorAddress;
+    setError(null);
+
+    unlockShieldedAccount(signer)
+      .then((keys) => {
+        if (!live) return;
+        setAccount({ address: signer.anchorAddress, signer, keys, email });
+      })
+      .catch((err: unknown) => {
+        if (!live) return;
+        /*
+          Let the next attempt through. A failed unlock is usually the provider
+          refusing rather than the account being wrong, and a gate that stayed
+          closed would make signing out and in again the only recovery from a
+          network blip.
+        */
+        unlocked.current = null;
+        reportSignInFailure(err);
+        setError(isSignInError(err) ? err.message : "Sign in failed. Please try again.");
+      });
+
+    return () => {
+      live = false;
     };
-  } catch (err) {
-    // Closing an already closed window is a no-op, so this is a safety net for
-    // the paths that do not reach the popup at all rather than a duplicate.
-    popup.close();
+  }, [signer, email]);
 
-    // A half finished sign in leaves a usable session key behind, and the next
-    // attempt generates its own. Dropping it here keeps the only rule this app
-    // has about secrets: they exist while they are being used and not after.
-    clearSessionKey();
-    throw err;
-  }
+  const begin = useCallback(() => {
+    setPending(true);
+    setError(null);
+    /*
+      No await, and nothing after it. This may navigate the page away, so any
+      cleanup written here would run only when the redirect failed to start ·
+      which is exactly the case the catch covers.
+    */
+    start().catch((err: unknown) => {
+      setPending(false);
+      reportSignInFailure(err);
+      setError(
+        isSignInError(err) ? err.message : "Sign in could not be started. Please try again.",
+      );
+    });
+  }, [start]);
+
+  /**
+   * Signing out, which is three acts that have to happen together.
+   *
+   * `end` closes the provider session and clears whatever it persisted. Dropping
+   * `account` is what releases the shielded keys, and that is the half that
+   * cannot be skipped: the view key reads history backwards and cannot be
+   * rotated, so leaving it live in a tab that says it is signed out is the worst
+   * version of this bug rather than a cosmetic one. The ref is cleared so a
+   * later sign in on the same page is not mistaken for one already done.
+   */
+  const signOut = useCallback(() => {
+    unlocked.current = null;
+    setAccount(null);
+    setError(null);
+    void end();
+  }, [end]);
+
+  const state = ((): SignInState => {
+    /*
+      A provider level refusal outranks anything this hook recorded. It means the
+      keyring is in a shape this app will not derive from, so retrying cannot fix
+      it and no later state should paper over it.
+    */
+    if (problem) return { stage: "failed", message: problem };
+    if (error) return { stage: "failed", message: error };
+    if (account) return { stage: "ready", account };
+    if (!ready) return { stage: "loading" };
+    if (!authenticated) return { stage: "signed-out" };
+    return { stage: "unlocking" };
+  })();
+
+  return { ...state, begin, signOut, pending: pending || starting };
 }
 
 /**
- * Forget the Turnkey session key.
+ * Say out loud why sign in stopped, without saying it on screen.
  *
- * **Half of signing out, and not the half that matters most.** This makes the
- * Turnkey session unusable, because a session is only its key here. It does
- * nothing about the shielded keys, which live in the gate's state and are handed
- * to the app through context, so on its own this leaves `viewPriv` readable by
- * any script on the page for the life of the tab while the user believes they
- * have signed out.
- *
- * That is why it is **not exported from `index.ts`**. `AuthGate` owns the
- * account object, so `AuthGate` owns signing out: it calls this and drops the
- * state in the same act, and `useSignOut` is what the rest of the app gets.
- * There is nothing persisted to clear, which is the point.
+ * Kept beside the flow rather than in `errors.ts` so that the one `console` call
+ * in `src/` sits where the failures it describes happen. Nothing secret passes
+ * through: the reasons name an address, a status, or a curve property, never a
+ * key, a signature or a token.
  */
-export function forgetSession(): void {
-  clearSessionKey();
+function reportSignInFailure(err: unknown): void {
+  if (isSignInError(err)) {
+    console.warn(`[cowl] sign in stopped: ${err.reason}`);
+    return;
+  }
+  console.warn("[cowl] sign in stopped:", err);
 }

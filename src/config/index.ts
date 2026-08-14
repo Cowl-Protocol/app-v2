@@ -9,9 +9,7 @@ export { TOKENS, tokensFor, tokenOn, type Token } from "./tokens";
 export { SHOW_PRELOADER, SKIP_LOGIN } from "./ui";
 export {
   AUTH_CONFIGURED,
-  GOOGLE_CLIENT_ID,
-  googleRedirectUri,
-  TURNKEY_API_BASE_URL,
-  TURNKEY_AUTH_PROXY_CONFIG_ID,
-  TURNKEY_AUTH_PROXY_URL,
+  OAUTH_REDIRECT_URL,
+  PRIVY_APP_ID,
+  PRIVY_CLIENT_ID,
 } from "./auth";
