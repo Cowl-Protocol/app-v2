@@ -1,4 +1,38 @@
+import { networkInterfaces } from "node:os";
 import type { NextConfig } from "next";
+
+/**
+ * Every spelling of "this machine", including the one the router hands out.
+ *
+ * Dev only. Next serves its chunks and its HMR socket to the host it was started
+ * on and blocks every other name for the same computer, so reaching the dev
+ * server at its LAN address gets HTML that never hydrates and a wall of
+ * "Blocked cross-origin request" in the terminal.
+ *
+ * **Read from the interfaces rather than written down.** A hardcoded
+ * `10.207.171.67` is right until the lease changes, a coffee shop hands out a
+ * different subnet, or somebody else clones this repo, and every one of those is
+ * the same afternoon lost to a page that renders and does nothing. This asks the
+ * machine, at dev start, and is therefore never stale.
+ *
+ * It runs in `next build` too and costs nothing there: a static export has no
+ * dev server for the list to apply to.
+ */
+function thisMachine(): string[] {
+  const names = ["127.0.0.1", "localhost", "[::1]"];
+
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      /* IPv4 only, and never the loopback the list already names. The runtime
+         has reported `family` as both a string and a number across Node
+         versions, so it is compared loosely rather than trusted to be one. */
+      const four = String(address.family) === "IPv4" || String(address.family) === "4";
+      if (four && !address.internal) names.push(address.address);
+    }
+  }
+
+  return names;
+}
 
 const nextConfig: NextConfig = {
   /**
@@ -36,12 +70,8 @@ const nextConfig: NextConfig = {
    */
   devIndicators: false,
 
-  /**
-   * Dev only. Next serves its chunks and HMR socket to the host it was started
-   * on and blocks every other spelling of this machine. Reach the dev server as
-   * 127.0.0.1 without this and the page arrives as HTML that never hydrates.
-   */
-  allowedDevOrigins: ["127.0.0.1", "localhost", "[::1]"],
+  /** See `thisMachine` above: loopback plus whatever address the network gave us. */
+  allowedDevOrigins: thisMachine(),
 };
 
 export default nextConfig;

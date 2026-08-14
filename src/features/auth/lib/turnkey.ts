@@ -475,5 +475,27 @@ async function turnkeyError(
     );
   }
 
+  // The organization ran out of signing quota, which is this deployment's
+  // problem and not this visitor's. Seen for real on 2026-08-14: every sign in
+  // stopped at the unlock signature with `Resource exhausted`, and the generic
+  // line sent people to press the button again, which is the one thing that
+  // could not work · exactly the failure the 401 case above exists to avoid.
+  //
+  // **Turnkey's own wording never reaches the screen.** It names a paid plan and
+  // a support address, which is advice for whoever runs this app and reads to a
+  // user as their money being behind a billing problem. The detail stays in
+  // `reason`, where the console has it and the operator can act on it.
+  //
+  // Matched on the message as well as the status, because a quota refusal is a
+  // gRPC `RESOURCE_EXHAUSTED` and which HTTP status that surfaces as is
+  // Turnkey's to change.
+  if (res.status === 429 || /resource exhausted|allotted quota|over its quota/i.test(detail)) {
+    return new SignInError(
+      "This app cannot sign right now, so your account could not be opened. " +
+        "Nothing was changed · try again later.",
+      `Turnkey ${path}: ${detail}`,
+    );
+  }
+
   return new Error(`Turnkey ${path}: ${detail}`);
 }
