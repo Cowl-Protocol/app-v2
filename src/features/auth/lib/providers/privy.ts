@@ -24,64 +24,24 @@
  * happily while the account space has silently moved. That is why the probe
  * freezes a value across days rather than only comparing within a run.
  */
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useCreateWallet,
   useLoginWithOAuth,
   usePrivy,
   useSignMessage,
   useWallets,
-  type ConnectedWallet,
 } from "@privy-io/react-auth";
-import { SignInError } from "../errors";
+import { reportSignInFailure, SignInError } from "../errors";
 import { ANCHOR_INDEX, type ShieldedSigner, type WalletSession } from "../signer";
+import { describeKeyring, walletAt } from "./select";
 
-/**
- * The wallet kinds Privy provisions and holds itself.
- *
- * An injected wallet a user happened to connect is **not** one of these and must
- * never be picked: this app's whole shape is that the user needed no wallet to
- * arrive, and deriving a shielded account from a browser extension's key would
- * put the balance somewhere the next session cannot reach.
- */
-const EMBEDDED: readonly string[] = ["privy", "privy-v2"];
-
-function isEmbedded(wallet: ConnectedWallet): boolean {
-  return EMBEDDED.includes(wallet.walletClientType);
-}
-
-/**
- * The wallet at one HD index: found, absent, or too many to choose from.
- *
- * **Selection is by index and an ambiguous answer is refused rather than
- * guessed at.** The previous adapter got this guarantee by matching a wallet by
- * name, and it is worth restating because the failure it prevents is silent and
- * unrecoverable: every Ethereum keyring has an account at index 0, so picking
- * `wallets[0]` yields an address, the unlock signature recovers to that address,
- * every check in `unlock.ts` passes, and a valid and permanently empty shielded
- * account is derived. Being unable to sign in is a bad afternoon. Deriving the
- * wrong account looks exactly like theft.
- *
- * **It returns the refusal rather than throwing it, and that is not a style
- * choice.** This runs during render. A throw there unmounts the tree with no
- * error boundary above it, so the user gets a white screen instead of the
- * sentence this refusal exists to show them · a check that protects money by
- * making the app disappear has traded one silent failure for another.
- */
-type Lookup =
-  | { found: ConnectedWallet }
-  | { found: null }
-  | { found: null; ambiguous: number };
-
-function walletAt(wallets: ConnectedWallet[], index: number): Lookup {
-  const matches = wallets.filter(
-    (w) => isEmbedded(w) && (w as ConnectedWallet & { walletIndex?: number | null }).walletIndex === index,
-  );
-
-  if (matches.length === 1) return { found: matches[0]! };
-  if (matches.length === 0) return { found: null };
-  return { found: null, ambiguous: matches.length };
-}
+/*
+  `walletAt`, `isEmbedded` and the keyring description moved to `./select.ts` so
+  they could be tested without loading the vendor SDK. The reasoning that shapes
+  them lives with them; the refusal they feed is still built here, because its
+  wording is this adapter's to own.
+*/
 
 /** The refusal an ambiguous keyring earns, in both halves. */
 function ambiguityError(index: number, count: number): SignInError {
@@ -198,48 +158,129 @@ export function usePrivyWalletSession(): WalletSession {
     `walletAt`. `useSignIn` turns it into a refusal on the login card.
   */
   const anchorLookup = walletAt(wallets, ANCHOR_INDEX);
-  const problem =
+  const ambiguity =
     walletsReady && "ambiguous" in anchorLookup
       ? ambiguityError(ANCHOR_INDEX, anchorLookup.ambiguous).message
       : null;
 
   /**
-   * Whether an anchor has already been asked for.
+   * Why provisioning the anchor stopped, or null while it has not.
    *
-   * A ref rather than state because it has to be true the instant it is set.
-   * Creating a wallet is a write, `useWallets` re-renders while it is in flight,
+   * **This exists because the failure it carries used to be invisible, and the
+   * shape is one this project keeps producing.** The creation below was fired
+   * and forgotten with its rejection swallowed, so a keyring that never yielded
+   * an anchor left `signer` null forever · which `useSignIn` reads as "still
+   * unlocking" and the login card renders as a spinner on the Google button.
+   * Every layer behaved correctly and the person waited on a screen that was
+   * never going to change, with nothing written anywhere saying why.
+   */
+  const [provisionFailure, setProvisionFailure] = useState<SignInError | null>(null);
+
+  /**
+   * The identity provisioning has already been attempted for.
+   *
+   * A ref rather than state because it has to be true the instant it is set:
+   * creating a wallet is a write, `useWallets` re-renders while it is in flight,
    * and a flag that landed on the next render would let a second creation start
    * against a keyring that already had one on the way.
+   *
+   * **One attempt per identity, not one per render.** Resetting this in a
+   * `finally` meant a creation that failed was retried on every later render for
+   * as long as the tab stayed open, against a provider that answers the second
+   * call with the same refusal as the first. Signing out clears it, which is
+   * what keeps a transient failure recoverable without making a permanent one a
+   * loop.
    */
-  const provisioning = useRef(false);
+  const attempted = useRef<string | null>(null);
+  const identity = user?.id ?? null;
 
   useEffect(() => {
     if (!ready || !authenticated || !walletsReady) return;
-    if (signer || provisioning.current || problem) return;
+    if (signer || ambiguity) return;
+    if (identity === null || attempted.current === identity) return;
 
-    provisioning.current = true;
+    attempted.current = identity;
     /*
       A brand new user has an identity and no keyring yet. `createOnLogin` in the
       provider config normally covers this, so reaching here means either that
       setting is off or the creation did not happen · in both cases doing it
       explicitly is the difference between a working sign in and a spinner.
-
-      The failure is swallowed on purpose: `useSignIn` reports the refusal a user
-      can see, and this effect has no screen. Letting the flag fall back means
-      the next render tries again rather than sticking.
     */
     void createWallet()
-      .catch(() => {})
-      .finally(() => {
-        provisioning.current = false;
+      .then((created) => {
+        /*
+          Created, and still not usable · the case worth naming out loud. Which
+          index a provider stamps on the wallet it just made is its behaviour
+          rather than its promise, so a keyring answering with no index, or with
+          a different one, would otherwise land in the same silent wait as an
+          outright failure. Refusing is the only honest answer available here:
+          taking whatever wallet is present instead is precisely the guess
+          `walletAt` exists to refuse, and it derives a valid, permanently empty
+          account that looks exactly like theft.
+        */
+        const at = (created as { walletIndex?: number | null }).walletIndex;
+        if (at === ANCHOR_INDEX) return;
+        setProvisionFailure(
+          new SignInError(
+            "Your account could not be opened, so nothing was unlocked. " +
+              "Sign out and try again.",
+            `provider created a wallet reporting index ${String(at ?? "none")}, ` +
+              `expected ${ANCHOR_INDEX} · keyring: ${describeKeyring(wallets)}`,
+          ),
+        );
+      })
+      .catch((err: unknown) => {
+        setProvisionFailure(
+          new SignInError(
+            "Your account could not be opened, so nothing was unlocked. " +
+              "Sign out and try again.",
+            `creating the wallet at index ${ANCHOR_INDEX} failed: ` +
+              `${err instanceof Error ? err.message : String(err)} · ` +
+              `keyring: ${describeKeyring(wallets)}`,
+          ),
+        );
       });
-  }, [ready, authenticated, walletsReady, signer, problem, createWallet]);
+  }, [
+    ready,
+    authenticated,
+    walletsReady,
+    signer,
+    ambiguity,
+    identity,
+    createWallet,
+    wallets,
+  ]);
+
+  /*
+    The reason goes to the console the same way every other sign in failure does,
+    because the message a user is shown deliberately carries no diagnosis and the
+    first live sign in against a provider is the only thing that can answer what
+    it reports. `describeKeyring` names client types and indices and never an
+    address.
+  */
+  useEffect(() => {
+    if (provisionFailure) reportSignInFailure(provisionFailure);
+  }, [provisionFailure]);
+
+  /*
+    Ambiguity first: it is knowable during the render that detects it, while a
+    provisioning failure is only knowable after a round trip, so reporting the
+    later one over the earlier would describe the second-best reason.
+  */
+  const problem = ambiguity ?? provisionFailure?.message ?? null;
 
   const begin = useCallback(async () => {
     await initOAuth({ provider: "google" });
   }, [initOAuth]);
 
   const end = useCallback(async () => {
+    /*
+      Clearing both is what makes a failed provisioning recoverable. The attempt
+      is capped at one per identity, so without this a person who hit a transient
+      failure would be handed the same refusal for the life of the tab.
+    */
+    attempted.current = null;
+    setProvisionFailure(null);
     await logout();
   }, [logout]);
 
