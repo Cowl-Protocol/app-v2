@@ -17,6 +17,7 @@
     "test:boundary": "node scripts/boundarycheck.mjs",
     "test": "npm run test:config && npm run test:keys && npm run test:notes && npm run test:history && npm run test:auth && npm run test:wallet && npm run test:boundary",
     "probe:chain": "tsx scripts/chainprobe.mts",
+    "probe:dashboard": "tsx scripts/dashboardprobe.mts",
     "probe:privy": "tsx scripts/privyprobe.mts"
   },
   "dependencies": {
