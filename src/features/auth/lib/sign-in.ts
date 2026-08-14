@@ -29,11 +29,12 @@ import { clearSessionKey, createSessionKey } from "./session-key";
 import {
   createSubOrg,
   findSubOrg,
-  listAccounts,
   oauthLogin,
+  openWallet,
   readSession,
   SIGNING_PATH,
   type Session,
+  type WalletAccount,
 } from "./turnkey";
 import { unlockShieldedAccount } from "./unlock";
 import type { ShieldedKeys } from "@/features/keys";
@@ -42,6 +43,16 @@ export type Account = {
   session: Session;
   /** The Ethereum address the shielded account derives from. Never shown, never published. */
   address: string;
+  /**
+   * The wallet the account lives on, and every account already derived on it.
+   *
+   * Carried from sign in rather than re-read later, because the one thing that
+   * needs it is issuing a receiving address, and listing the wallet again to do
+   * that would risk answering from a different wallet than the one this session
+   * was opened against. `openWallet` refuses an ambiguous answer; the way to
+   * keep that guarantee is to ask once.
+   */
+  wallet: { id: string; accounts: WalletAccount[] };
   keys: ShieldedKeys;
   /** Only for the account control in the top bar. The address and the email stay off screen. */
   email: string;
@@ -72,8 +83,8 @@ export async function signIn(): Promise<Account> {
 
     const session = readSession(await oauthLogin({ oidcToken: idToken, publicKey }));
 
-    const accounts = await listAccounts(session);
-    const signing = accounts.find((a) => a.path === SIGNING_PATH);
+    const wallet = await openWallet(session);
+    const signing = wallet.accounts.find((a) => a.path === SIGNING_PATH);
     if (!signing) {
       // Reachable only if a wallet was created outside this code, which today
       // means a dashboard default. Guessing at another account here would derive
@@ -81,12 +92,18 @@ export async function signIn(): Promise<Account> {
       throw new SignInError(
         "This account's wallet is not in the shape this app expects, so it cannot " +
           "be opened safely. Nothing was changed.",
-        `wallet has no account at ${SIGNING_PATH}, found ${accounts.map((a) => a.path).join(", ")}`,
+        `wallet has no account at ${SIGNING_PATH}, found ${wallet.accounts.map((a) => a.path).join(", ")}`,
       );
     }
 
     const keys = await unlockShieldedAccount({ session, signWith: signing.address });
-    return { session, address: signing.address, keys, email };
+    return {
+      session,
+      address: signing.address,
+      wallet: { id: wallet.walletId, accounts: wallet.accounts },
+      keys,
+      email,
+    };
   } catch (err) {
     // Closing an already closed window is a no-op, so this is a safety net for
     // the paths that do not reach the popup at all rather than a duplicate.

@@ -88,6 +88,19 @@ export function useAccount(): { email: string; paymentAddress: string } | null {
  * note at the top of this file for why that is a boundary rather than a naming
  * preference.
  */
+/**
+ * The whole account record, for this feature's own hooks.
+ *
+ * **Not exported from `index.ts`**, because the record carries the shielded keys
+ * and the session together. `useAccount` above is what leaves this feature: it
+ * hands over an email and a payment address, which is everything a screen may
+ * know. This exists so `funnel.ts` can reach the session and the wallet without
+ * a second copy of them being threaded through the app.
+ */
+export function useAccountRecord(): Account | null {
+  return useContext(AccountContext);
+}
+
 export function useShieldedKeys(): ShieldedKeys | null {
   return useContext(AccountContext)?.keys ?? null;
 }

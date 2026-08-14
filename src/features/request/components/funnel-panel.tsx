@@ -2,21 +2,23 @@
 
 import { useState } from "react";
 import { Panel } from "@/components/ui/panel";
-import type { FunnelAddress } from "../types";
+import { formatAmount } from "@/lib/format";
+import type { FunnelAddress, TokenAmount } from "../types";
 import { QrCode } from "./qr-code";
 
 /**
  * Receive, for senders that are not Cowl users.
  *
- * **Half of this tab is live and half of it is not, and the panel says which.**
- * The payment link is real: it names the session's own address and the chain in
- * force, and anybody who clicks it pays straight into this balance. The plain
- * `0x` funnel underneath is not, because a funnel is a derived wallet address at
- * index 1 and up, and this app provisions exactly one account today. So the
- * address block renders only when there is a real address to put in it, and
- * otherwise the panel says what is missing in a sentence. It used to render a
- * sample: an EIP-55 string hashed from a fixed phrase, which an exchange form
- * accepts and pays into a wallet nobody holds the key to.
+ * **Both halves are live now.** The payment link names the session's own
+ * `zcowl1…` and the chain in force. The plain address under it is account index
+ * 1 on the same keyring, derived by Turnkey inside the enclave, and anything
+ * sent to it genuinely arrives somewhere this account controls. It used to
+ * render a sample: an EIP-55 string hashed from a fixed phrase, which an
+ * exchange form accepts and pays into a wallet nobody holds the key to.
+ *
+ * **What has landed is shown as it lands**, because a deposit is somebody else's
+ * action and a screen that made a person reload to find out is a screen that
+ * makes them wonder whether it arrived at all.
  *
  * Two artifacts, and the order is the argument. The payment link comes first
  * because a person clicking it pays from their own wallet straight into the
@@ -39,12 +41,28 @@ import { QrCode } from "./qr-code";
 
 export function FunnelPanel({
   funnel = null,
+  issuing = false,
+  unavailable,
+  arrivals = [],
   networkLabel,
   onRequest,
   tabs,
 }: {
   /** The session's own public funnel, or null while none is derived. */
   funnel?: FunnelAddress | null;
+  /** The derivation is in flight, which is not the same as there being none. */
+  issuing?: boolean;
+  /**
+   * Why there is no address, when there is a session and still no address.
+   *
+   * Its own prop rather than a third state to infer, because the sentence for
+   * "not signed in" and the sentence for "Turnkey refused" are different
+   * problems with different answers, and showing the first to somebody who is
+   * signed in sends them to do the one thing that will not help.
+   */
+  unavailable?: string;
+  /** What is sitting on it right now, read from the chain. */
+  arrivals?: TokenAmount[];
   networkLabel: string;
   /** Opens the same request dialog the Cowl tab uses. One machine, two doors. */
   onRequest?: () => void;
@@ -89,29 +107,57 @@ export function FunnelPanel({
               {networkLabel}
             </p>
 
+            <Landed arrivals={arrivals} />
+
             {/*
               The sequence of events, in the order the person experiences it,
-              with no property claimed for it. "Moves into your balance" is the
-              automatic session move; naming its mechanism here would spend the
-              caption on infrastructure. The last clause is the watch rule, said
-              small: an old address still lands.
+              with no property claimed for it. **It does not promise the move
+              yet**: nothing in this app can build the proof a deposit needs, so
+              what arrives sits here until it can, and saying otherwise would be
+              a promise the product has not kept.
             */}
             <p className="mt-2.5 text-[11px] leading-snug text-bone/35">
-              Lands here first, then moves into your balance next time you open
-              the app. You get a fresh one after each use · old ones keep
-              working.
+              This address is yours and keeps working. Anything sent to it lands
+              in public first · adding it to your private balance is the one step
+              this app cannot take yet.
             </p>
           </>
         ) : (
           <p className="mt-1.5 bg-white/[0.03] px-3 py-3 text-[11px] leading-snug text-bone/35">
-            Not issued yet. Withdrawing from an exchange needs a public address
-            of your own, and this session holds one account rather than a
-            sequence. The payment link above works today and lands the money
-            straight in your balance.
+            {issuing
+              ? "Deriving your deposit address."
+              : unavailable
+                ? `Your deposit address could not be derived · ${unavailable}`
+                : "Sign in and this address is derived from your own keyring. Nothing is held on our side, so there is nothing to show until it is."}
           </p>
         )}
       </div>
     </Panel>
+  );
+}
+
+/**
+ * What is sitting on the funnel, if anything.
+ *
+ * **Absent when the address is empty**, rather than a row saying zero. An empty
+ * deposit address is the ordinary state and the caption above already explains
+ * what the address is for; a line reading "0 ETH" would be a fact about nothing
+ * that also looks like a balance.
+ */
+function Landed({ arrivals }: { arrivals: TokenAmount[] }) {
+  if (arrivals.length === 0) return null;
+
+  return (
+    <div className="mt-2.5 flex flex-col gap-1 bg-mark/[0.07] px-3 py-2">
+      <p className="font-mono text-[9.5px] tracking-[0.2em] text-bone/45 uppercase">
+        Landed here
+      </p>
+      {arrivals.map((a) => (
+        <p key={a.symbol} className="font-mono text-[11.5px] tabular-nums text-mark">
+          {formatAmount(a.amount, a.decimals)} {a.symbol}
+        </p>
+      ))}
+    </div>
   );
 }
 

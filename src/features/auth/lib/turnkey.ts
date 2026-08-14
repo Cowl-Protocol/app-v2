@@ -51,6 +51,24 @@ export const WALLET_NAME = "Cowl";
  */
 export const SIGNING_PATH = "m/44'/60'/0'/0/0";
 
+/**
+ * The receiving addresses, which are every account after the first.
+ *
+ * **Index 0 is the anchor and is never issued.** It signs the unlock message,
+ * so it is the one address whose appearance on chain would tie a public
+ * transfer to the account the shielded balance derives from. Everything handed
+ * to a payer starts at 1.
+ *
+ * The keyring is the same one, so a funnel is recoverable from the same Google
+ * login rather than being something that had to be written down.
+ */
+export function funnelPath(index: number): string {
+  if (!Number.isInteger(index) || index < 1) {
+    throw new Error(`Funnel index must be a whole number from 1, got ${index}.`);
+  }
+  return `m/44'/60'/0'/0/${index}`;
+}
+
 /* ------------------------------------------------------------------------- *
  * the auth proxy: the two calls that need the parent organization's key
  * ------------------------------------------------------------------------- */
@@ -225,6 +243,12 @@ export type WalletAccount = {
   path: string;
 };
 
+export type Wallet = {
+  /** Needed to add an account later, which is how a funnel gets issued. */
+  walletId: string;
+  accounts: WalletAccount[];
+};
+
 /**
  * The accounts on **this app's** wallet.
  *
@@ -243,7 +267,7 @@ export type WalletAccount = {
  * in is a bad afternoon; deriving the wrong account is unrecoverable and looks
  * exactly like theft.
  */
-export async function listAccounts(session: Session): Promise<WalletAccount[]> {
+export async function openWallet(session: Session): Promise<Wallet> {
   const { wallets } = await signed<{ wallets: { walletId: string; walletName: string }[] }>(
     "/public/v1/query/list_wallets",
     { organizationId: session.organizationId },
@@ -278,7 +302,54 @@ export async function listAccounts(session: Session): Promise<WalletAccount[]> {
     walletId: candidates[0]!.walletId,
   });
 
-  return accounts.accounts.map((a) => ({ address: a.address, path: a.path }));
+  return {
+    walletId: candidates[0]!.walletId,
+    accounts: accounts.accounts.map((a) => ({ address: a.address, path: a.path })),
+  };
+}
+
+/**
+ * Add one account to this wallet and return the address it derived.
+ *
+ * **This is how a funnel comes into existence**, and it is the only write to the
+ * wallet this app makes after signup. The path is passed in rather than counted
+ * here, because which index is next is a question about the accounts that
+ * already exist and that answer belongs beside them.
+ *
+ * Turnkey derives it inside the enclave from the same seed as the signing
+ * account, so the address is recoverable from the same Google login and nothing
+ * about it has to be stored here. The activity is idempotent in the way that
+ * matters: asking for a path that already exists returns its address rather than
+ * a second account.
+ */
+export async function createWalletAccount(params: {
+  session: Session;
+  walletId: string;
+  path: string;
+}): Promise<string> {
+  const res = await signed<ActivityResponse>("/public/v1/submit/create_wallet_accounts", {
+    type: "ACTIVITY_TYPE_CREATE_WALLET_ACCOUNTS",
+    timestampMs: String(Date.now()),
+    organizationId: params.session.organizationId,
+    parameters: {
+      walletId: params.walletId,
+      accounts: [
+        {
+          curve: "CURVE_SECP256K1",
+          pathFormat: "PATH_FORMAT_BIP32",
+          path: params.path,
+          addressFormat: "ADDRESS_FORMAT_ETHEREUM",
+        },
+      ],
+    },
+  });
+
+  const done = await settle(res, params.session);
+  const address = done.activity.result?.createWalletAccountsResult?.addresses?.[0];
+  if (!address) {
+    throw new Error("Turnkey created the account but returned no address for it.");
+  }
+  return address;
 }
 
 /**
@@ -327,7 +398,10 @@ type ActivityResponse = {
     id: string;
     status: string;
     failure?: { message?: string };
-    result?: { signRawPayloadResult?: { r: string; s: string; v: string } };
+    result?: {
+      signRawPayloadResult?: { r: string; s: string; v: string };
+      createWalletAccountsResult?: { addresses?: string[] };
+    };
   };
 };
 

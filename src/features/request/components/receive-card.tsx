@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { tokensFor } from "@/config";
-import { useAccount } from "@/features/auth";
+import { useAccount, useFunnel } from "@/features/auth";
 import { useNetwork } from "@/lib/network";
+import { useArrivals } from "../lib/use-arrivals";
 import { FunnelPanel } from "./funnel-panel";
 import { ReceivePanel } from "./receive-panel";
 import { ReceiveTabs, type ReceiveTab } from "./receive-tabs";
@@ -45,6 +46,18 @@ export function ReceiveCard() {
   const account = useAccount();
   const network = useNetwork();
 
+  /*
+    The public side of receiving, issued from the same keyring.
+
+    Asked for on every render of this card rather than only on the tab that
+    shows it: deriving it is one Turnkey activity per session and the answer
+    never changes, and a person who switches to "From anywhere" expecting an
+    address should not then wait for a round trip to start.
+  */
+  const funnel = useFunnel();
+  const funnelAddress = funnel.state === "ready" ? funnel.address : null;
+  const arrivals = useArrivals(funnelAddress);
+
   const tabs = <ReceiveTabs active={tab} onSelect={setTab} />;
 
   /*
@@ -75,6 +88,14 @@ export function ReceiveCard() {
         />
       ) : (
         <FunnelPanel
+          funnel={
+            funnel.state === "ready"
+              ? { index: funnel.index, address: funnel.address, issued: "Yours" }
+              : null
+          }
+          issuing={funnel.state === "issuing"}
+          unavailable={funnel.state === "unavailable" ? funnel.reason : undefined}
+          arrivals={arrivals.state === "ready" ? arrivals.holding : []}
           networkLabel={network.label}
           onRequest={live ? () => setDialog("request") : undefined}
           tabs={tabs}

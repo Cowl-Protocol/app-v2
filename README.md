@@ -206,6 +206,12 @@ click  ->  P-256 keypair, non-extractable, in memory
        ->  shielded keys, derived in this tab
 ```
 
+**Account 0 signs and never appears on chain. Account 1 is the deposit
+address.** The anchor's whole job is that signature, and an anchor seen receiving
+in public ties a transfer to the account a shielded balance derives from.
+`features/auth/lib/funnel.ts` derives index 1 on demand, through Turnkey, inside
+the enclave, and nothing about it is stored here.
+
 **No server, still.** Sub-organization creation needs the parent organization's
 API key, and until Turnkey shipped a managed auth proxy that meant running a
 small service to hold one. It no longer does. That is better than convenient: a

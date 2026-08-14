@@ -7,6 +7,20 @@
  * right.
  */
 
+/**
+ * Base units of one token, with enough beside it to print.
+ *
+ * `token` is the pool's id for it, carried so a caller can look the same asset
+ * up in a price table without going through the ticker, which a token chooses
+ * for itself.
+ */
+export type TokenAmount = {
+  symbol: string;
+  amount: bigint;
+  decimals: number;
+  token: bigint;
+};
+
 /** A token, as a request needs it. Deliberately not the portfolio's `Asset`. */
 export type RequestToken = {
   symbol: string;

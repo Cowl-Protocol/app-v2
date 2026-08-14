@@ -28,3 +28,9 @@ export { AuthGate } from "./components/auth-gate";
 export { SessionBar } from "./components/session-bar";
 export { OAuthRelay } from "./components/oauth-relay";
 export { useAccount, useSignOut } from "./lib/account-context";
+/**
+ * The public deposit address. Published by design, like the payment address, and
+ * out here for the same reason: it holds no secret and the feature that renders
+ * it is not a key consumer.
+ */
+export { useFunnel, type Funnel } from "./lib/funnel";
