@@ -47,8 +47,8 @@ const SELF = fileURLToPath(import.meta.url);
  * five passes.
  */
 if (process.argv.includes("--probe")) {
-  const { ACTIVE_NETWORK } = await import("../src/config/networks");
-  console.log(ACTIVE_NETWORK.key);
+  const { DEFAULT_NETWORK } = await import("../src/config/networks");
+  console.log(DEFAULT_NETWORK.key);
   process.exit(0);
 }
 
@@ -71,8 +71,8 @@ function is(label: string, actual: unknown, expected: unknown) {
   else fail(label, `expected ${String(expected)}, got ${String(actual)}`);
 }
 
-const { NETWORKS, ACTIVE_NETWORK, __networks } = await import("../src/config/networks");
-const { TOKENS, ACTIVE_TOKENS, tokenOn } = await import("../src/config/tokens");
+const { NETWORKS, NETWORK_LIST, DEFAULT_NETWORK, __networks } = await import("../src/config/networks");
+const { TOKENS, tokensFor, tokenOn } = await import("../src/config/tokens");
 const { resolveNetwork } = __networks;
 
 console.log("\nThe selection rule\n");
@@ -131,7 +131,7 @@ function probe(value: string | undefined): { key: string } | { error: string } {
   is("a build told nothing runs on testnet", "key" in unset ? unset.key : unset.error, "robinhood-testnet");
 
   const mainnet = probe("robinhood-mainnet");
-  is("the variable reaches ACTIVE_NETWORK, so the rule is not decoration", "key" in mainnet ? mainnet.key : mainnet.error, "robinhood-mainnet");
+  is("the variable reaches DEFAULT_NETWORK, so the rule is not decoration", "key" in mainnet ? mainnet.key : mainnet.error, "robinhood-mainnet");
 
   const bad = probe("robinhood-mainet");
   if ("error" in bad && bad.error.includes("NEXT_PUBLIC_COWL_NETWORK")) {
@@ -155,7 +155,31 @@ console.log("\nNetworks\n");
     else fail(`${key} · has a deploy block`, "a replay from genesis is refused by every public RPC");
     if (net.rpcFallbacks.length > 0) ok(`${key} · has somewhere to go when its RPC stops answering`);
     else fail(`${key} · has an RPC fallback`, "public endpoints go down, and one entry is a single point of failure");
+
+    /* The picker renders this. An empty one is a nameless row in a menu that
+       decides which chain a balance is read from. */
+    if (net.short.trim()) ok(`${key} · has a short name for the bar's chip`);
+    else fail(`${key} · has a short name`, "the network chip would render an empty label");
   }
+
+  /*
+    The picker offers every network, and offers each of them once.
+
+    Written out by hand in `NETWORK_LIST` so the order is a decision rather than
+    an object literal's key order, which is exactly the shape that silently drops
+    a chain: a network added to the table above and forgotten here is one a
+    session can never reach, and the bar would not look any different.
+  */
+  const listed = NETWORK_LIST.map((n) => n.key);
+  is("the picker lists every network this build knows", listed.length, Object.keys(NETWORKS).length);
+  if (new Set(listed).size === listed.length) ok("no network is listed twice in the picker");
+  else fail("the picker lists each network once", listed.join(", "));
+
+  const shorts = NETWORK_LIST.map((n) => n.short);
+  if (new Set(shorts).size === shorts.length) ok("no two networks answer to the same short name");
+  else fail("short names are unique", `a picker cannot be read when two rows say ${shorts.join(" and ")}`);
+
+  is("the picker opens on mainnet, not on the rehearsal chain", listed[0], "robinhood-mainnet");
 }
 
 console.log("\nTokens\n");
@@ -209,7 +233,7 @@ console.log("\nLookups\n");
   is("COWL is on mainnet", tokenOn(mainnet, "COWL")?.decimals, 18);
   is("an uncurated ticker is not invented", tokenOn(mainnet, "AAPL"), undefined);
   is("the match is case sensitive, the same as the table it replaced", tokenOn(mainnet, "usdg"), undefined);
-  is("the active build's token set is its own network's", ACTIVE_TOKENS, TOKENS[ACTIVE_NETWORK.key]);
+  is("a network's token set is its own", tokensFor(DEFAULT_NETWORK), TOKENS[DEFAULT_NETWORK.key]);
 }
 
 /** EIP-55: the mixed case is a checksum over the address, and a typo breaks it. */

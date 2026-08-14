@@ -1,6 +1,6 @@
-import { AppBar } from "@/components/layout/app-bar";
-import { AuthGate } from "@/features/auth";
-import { HomeScreen, PROFILE } from "@/features/portfolio";
+import { AuthGate, SessionBar } from "@/features/auth";
+import { HomeScreen } from "@/features/portfolio";
+import { NetworkProvider } from "@/lib/network";
 
 /**
  * The whole app, on one route.
@@ -20,6 +20,12 @@ import { HomeScreen, PROFILE } from "@/features/portfolio";
  *
  * A route file picks the route and hands off. The shell belongs here, the
  * behaviour belongs to the features.
+ *
+ * **`NetworkProvider` is mounted here rather than in the layout**, and inside
+ * the gate rather than around it. The chain picker belongs to the signed in
+ * screen: the login card reads no chain, and `/pay` deliberately references
+ * nothing on this path, since a payer's chain is named by the link they were
+ * handed and is not theirs to switch.
  */
 export default function Page() {
   return (
@@ -34,10 +40,12 @@ export default function Page() {
           className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(60%_100%_at_50%_0%,rgba(201,250,1,0.05),transparent_70%)]"
         />
 
-        <div className="relative flex flex-1 flex-col gap-5">
-          <AppBar profile={PROFILE} />
-          <HomeScreen />
-        </div>
+        <NetworkProvider>
+          <div className="relative flex flex-1 flex-col gap-5">
+            <SessionBar />
+            <HomeScreen />
+          </div>
+        </NetworkProvider>
       </main>
     </AuthGate>
   );

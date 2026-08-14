@@ -40,6 +40,16 @@ export type Asset = {
  */
 export type ActivityKind = "receive" | "send" | "swap" | "shield" | "unshield";
 
+/**
+ * **Two of those five are never produced today**, and the reason is a fact about
+ * the contract rather than about this file. The pool emits commitments, ciphers
+ * and nullifiers, and a deposit is indistinguishable from a payment in all
+ * three: telling `shield` from `receive` means attributing a token transfer to
+ * this account's own wallet address, which is the one address no screen here is
+ * allowed to read. They stay in the union because the day the boundary becomes
+ * attributable, the label is already designed and already tested.
+ */
+
 export type Activity = {
   id: string;
   kind: ActivityKind;
@@ -49,11 +59,18 @@ export type Activity = {
   /** Base units, unsigned. The sign is the kind's job, not the number's. */
   amount: bigint;
   decimals: number;
-  /** Already relative, because this is placeholder copy and not a clock. */
+  /** Already phrased, against the one clock the whole screen dates from. */
   when: string;
 };
 
-/** One reading on the 7 day value trace. */
+/**
+ * One reading on the 7 day value trace.
+ *
+ * The series is rebuilt backwards from today's holdings by undoing movements,
+ * and valued throughout at today's price, because this app has no price history
+ * and will not pretend to. `lib/trace.ts` carries what that does and does not
+ * make the line mean.
+ */
 export type TracePoint = { t: string; usd: number };
 
 /**
@@ -75,12 +92,20 @@ export type TracePoint = { t: string; usd: number };
  * nothing until it does.
  */
 export type ClientStatus = {
-  /** Last completed sync, already phrased. */
-  synced: string;
+  /** Last completed sync, already phrased. Null before the first one lands. */
+  synced: string | null;
   /**
-   * Proving material resident in the tab. False means the first send of the
-   * session waits on a large download before anything appears to happen, which
-   * is the one delay in this app long enough to read as a failure.
+   * Whether the replay agreed with the pool's own root, and null before it has
+   * been asked.
+   *
+   * **This replaced a "ready to send" flag that could not be answered
+   * honestly.** That field described proving material resident in the tab, and
+   * nothing in this app proves anything yet, so it was a light that was on
+   * because it was drawn on. What is here instead is the check the scan already
+   * performs and never showed: a replay that lost a log window returns fewer
+   * notes, no error, and a balance that is quietly short. That is the one
+   * failure on this screen worth a person's attention, and it is the one that
+   * otherwise looks calm.
    */
-  readyToSend: boolean;
+  integrity: "complete" | "moved" | "mismatch" | "gap" | null;
 };

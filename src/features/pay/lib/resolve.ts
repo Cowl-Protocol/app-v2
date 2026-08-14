@@ -46,8 +46,8 @@ export function resolveRequest(
   /*
     Decimals come from the token registry, on the chain the link names, and a
     token that is not in it is refused rather than assumed. This used to be a
-    table of four tickers living in the placeholder module beside the sample
-    request, which meant a token whose real decimals differed from the guess
+    table of four tickers that lived in this feature's placeholder module,
+    which meant a token whose real decimals differed from the guess
     would have rendered an amount off by orders of magnitude while looking
     completely ordinary. The registry ends the guess for what it curates; the
     read that ends it for everything else is a call to the token itself, and it

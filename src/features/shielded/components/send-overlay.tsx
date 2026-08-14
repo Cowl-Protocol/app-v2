@@ -6,12 +6,22 @@ import { TokenSelect, TokenTrigger } from "@/components/ui/token-select";
 import { formatAmount, toBaseUnits } from "@/lib/format";
 import { decodeRequest, type RequestPayload } from "@/lib/request-link";
 import { cn } from "@/lib/utils";
-import { BOOK, IS_PLACEHOLDER, PRICES } from "../lib/placeholder";
+import { usePrices } from "@/lib/price";
 import type { SpendableToken } from "../types";
 import { pickerRows } from "../lib/picker-rows";
+import { useRelayerFee, type FeeQuote } from "../lib/relayer-fee";
+import { toSpendable } from "../lib/spendable";
+import { useShieldedBook } from "../lib/use-book";
 
 /**
- * Send, and its second door, Pay. **Layout only, wired to nothing.**
+ * Send, and its second door, Pay.
+ *
+ * **The book and the fee are real; the submit is not.** Balances, the per-token
+ * ceiling and the relayer's fee all come off the chain and the relayer, so every
+ * refusal this form makes is a refusal a real send would meet. What is still
+ * missing is the other end: nothing in this app builds a proof yet, so the
+ * button composes a spend and submits it nowhere. That is the honest remaining
+ * gap and it is one module, not a redesign.
  *
  * One overlay for both verbs, because underneath they are one machine: a
  * payment link is a send whose destination and amount arrived pre filled and
@@ -87,19 +97,48 @@ export function SendOverlay({
   stage?: SendStage;
 }) {
   const [rawDest, setRawDest] = useState("");
-  const [token, setToken] = useState<SpendableToken>(BOOK[0]!);
+  const [chosen, setChosen] = useState<bigint | null>(null);
   const [typed, setTyped] = useState("");
   const [picking, setPicking] = useState(false);
+
+  const book = useShieldedBook();
+  const prices = usePrices();
+
+  /*
+    The real book, or nothing at all. A spend surface opened over a scan that has
+    not finished has no balances to compose against, and standing in for them
+    here is how a send gets composed for money that is not there.
+  */
+  const tokens = useMemo(
+    () => (book.state === "ready" ? toSpendable(book.holdings) : []),
+    [book],
+  );
 
   const dest = useMemo(() => classify(rawDest, chainId), [rawDest, chainId]);
 
   /** The request's own token, when a link is driving the form. */
   const reqToken = useMemo(() => {
     if (dest.kind !== "request") return null;
-    return BOOK.find((t) => t.symbol === dest.payload.token) ?? null;
-  }, [dest]);
+    return tokens.find((t) => t.symbol === dest.payload.token) ?? null;
+  }, [dest, tokens]);
 
-  const active = dest.kind === "request" ? reqToken : token;
+  /*
+    The chosen token, or the first one held. Derived rather than stored, so a
+    scan landing after this opened fills the field instead of leaving it on a
+    token the book turned out not to hold.
+  */
+  const token = tokens.find((t) => t.token === chosen) ?? tokens[0] ?? null;
+  const selected = dest.kind === "request" ? reqToken : token;
+
+  /*
+    The fee is quoted for the token actually being sent, and it rides inside the
+    same spend as the amount. Until the relayer answers there is no total to
+    compare against, so the action stays shut rather than treating an unknown
+    fee as zero.
+  */
+  const quote = useRelayerFee(selected?.token ?? null);
+  const fee = quote.state === "quoted" ? quote.fee : null;
+  const active = selected && fee !== null ? { ...selected, fee } : selected;
 
   /**
    * What this send would move, fee included, against what one send can move.
@@ -113,18 +152,24 @@ export function SendOverlay({
       const base = toBaseUnits(dest.payload.amount, reqToken.decimals);
       return base > 0n ? base : null;
     }
+    if (!token) return null;
     if (!/^\d*\.?\d*$/.test(typed) || typed === "" || typed === ".") return null;
     const base = toBaseUnits(typed, token.decimals);
     return base > 0n ? base : null;
   }, [dest, reqToken, typed, token]);
 
-  const overBalance = active && amount !== null && amount + active.fee > active.balance;
+  const overBalance =
+    active && amount !== null && amount + (active.fee ?? 0n) > active.balance;
   const overCeiling =
-    active && amount !== null && !overBalance && amount + active.fee > active.ceiling;
+    active &&
+    amount !== null &&
+    !overBalance &&
+    amount + (active.fee ?? 0n) > active.ceiling;
 
   const sendable =
     stage === "compose" &&
     amount !== null &&
+    fee !== null &&
     !overBalance &&
     !overCeiling &&
     (dest.kind === "private" || dest.kind === "public" || (dest.kind === "request" && !!reqToken));
@@ -143,9 +188,17 @@ export function SendOverlay({
 
   return (
     <Overlay title={title} onClose={onClose}>
-      {IS_PLACEHOLDER && (
-        <p className="mb-3 bg-white/[0.05] px-3 py-2 font-mono text-[10px] tracking-[0.14em] text-bone/50 uppercase">
-          Sample · sends nothing
+      {/*
+        Nothing to send, said before the form rather than after it. A composer
+        over an empty book can only ever refuse, and the two reasons it can be
+        empty are worth separating: a scan still running is not an account with
+        nothing in it.
+      */}
+      {tokens.length === 0 && (
+        <p className="mb-3 bg-white/[0.05] px-3 py-2 text-[11.5px] leading-snug text-bone/50">
+          {book.state === "ready"
+            ? "Nothing in your balance to send yet."
+            : "Reading your balance from the chain."}
         </p>
       )}
 
@@ -167,7 +220,7 @@ export function SendOverlay({
       )}
       <DestNote dest={dest} />
 
-      {dest.kind !== "request" && dest.kind !== "wrongChain" && (
+      {dest.kind !== "request" && dest.kind !== "wrongChain" && token && (
         <>
           {/*
             The dapp's composition: the token lives inside the amount row as a
@@ -201,7 +254,10 @@ export function SendOverlay({
                   compose a send the two lines below immediately refuse.
                 */
                 const cap = token.ceiling < token.balance ? token.ceiling : token.balance;
-                const max = cap - token.fee;
+                /* The fee rides in the same transaction, so the most that can
+                   be delivered is the cap minus it. An unquoted fee is not
+                   zero: without it there is no max to fill in. */
+                const max = fee === null ? 0n : cap - fee;
                 setTyped(max > 0n ? formatAmount(max, token.decimals).replace(/,/g, "") : "0");
               }}
               className="shrink-0 px-1 font-mono text-[10px] tracking-[0.16em] text-bone/45 uppercase transition-colors hover:text-mark"
@@ -217,15 +273,15 @@ export function SendOverlay({
         </>
       )}
 
-      {picking && (
+      {picking && token && (
         <TokenSelect
           title="Send"
-          tokens={pickerRows(BOOK, PRICES)}
+          tokens={pickerRows(tokens, prices)}
           selected={token.symbol}
           onSelect={(symbol) => {
-            const next = BOOK.find((t) => t.symbol === symbol);
+            const next = tokens.find((t) => t.symbol === symbol);
             if (next) {
-              setToken(next);
+              setChosen(next.token);
               // A different token is a different amount question.
               setTyped("");
             }
@@ -234,7 +290,13 @@ export function SendOverlay({
         />
       )}
 
-      <AmountNote token={active} amount={amount} overBalance={!!overBalance} overCeiling={!!overCeiling} />
+      <AmountNote
+        token={active}
+        amount={amount}
+        quote={quote}
+        overBalance={!!overBalance}
+        overCeiling={!!overCeiling}
+      />
 
       <button
         type="button"
@@ -288,19 +350,33 @@ function DestNote({ dest }: { dest: Dest }) {
  * The fee, then the two refusals, in the order they should interrupt: more
  * than you hold beats the ceiling, because "send less" is the answer to both
  * and the balance is the harder wall.
+ *
+ * **An unquoted fee comes before either**, for the same reason they are ordered
+ * at all: without the relayer's number there is nothing to compare an amount
+ * against, so "that is more than you hold" would be a verdict reached without
+ * the figure that decides it.
  */
 function AmountNote({
   token,
   amount,
+  quote,
   overBalance,
   overCeiling,
 }: {
   token: SpendableToken | null;
   amount: bigint | null;
+  quote: FeeQuote;
   overBalance: boolean;
   overCeiling: boolean;
 }) {
   if (!token) return null;
+
+  if (quote.state === "unavailable") {
+    return <Note tone="warn">{quote.reason} Nothing can be sent until it answers.</Note>;
+  }
+  if (quote.state === "quoting" || token.fee === null) {
+    return <Note>Asking the relayer what this costs.</Note>;
+  }
 
   if (overBalance) {
     return <Note tone="warn">That is more than you hold.</Note>;

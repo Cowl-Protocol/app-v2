@@ -14,8 +14,8 @@
  * So it happens only for tokens the registry does not already answer, and the
  * result is held in memory for the session and never written down.
  */
-import { ACTIVE_NETWORK, ACTIVE_TOKENS, type Token } from "@/config";
-import { publicClient } from "@/lib/rpc";
+import { tokensFor, type Network, type Token } from "@/config";
+import { clientFor } from "@/lib/rpc";
 import { fieldToAddress } from "./note";
 
 /** Just enough of ERC-20 to put a name and a decimal point on a row. */
@@ -32,13 +32,28 @@ export type TokenMeta = Pick<Token, "symbol" | "name" | "decimals" | "logoURI"> 
   curated: boolean;
 };
 
-/** Session lifetime, in memory, gone with the tab like everything else here. */
-const learned = new Map<bigint, TokenMeta>();
+/**
+ * Session lifetime, in memory, gone with the tab like everything else here.
+ *
+ * **Keyed by network as well as by token, and that is not caution for its own
+ * sake.** A pool's token id is an address as a field element, and the same
+ * address on two chains is two different deployments: the testnet stand-ins were
+ * read from `TestVenue.sol` and are free to carry different decimals from the
+ * mainnet tokens they stand in for. A cache keyed on the id alone would answer a
+ * switched session with the other chain's decimals, which renders a balance
+ * wrong by a factor of ten and reads perfectly.
+ */
+const learned = new Map<string, TokenMeta>();
 
-function fromRegistry(token: bigint): Token | undefined {
-  if (token === 0n) return ACTIVE_TOKENS.find((t) => t.native);
+function cacheKey(network: Network, token: bigint): string {
+  return `${network.key}:${token}`;
+}
+
+function fromRegistry(network: Network, token: bigint): Token | undefined {
+  const tokens = tokensFor(network);
+  if (token === 0n) return tokens.find((t) => t.native);
   const address = fieldToAddress(token).toLowerCase();
-  return ACTIVE_TOKENS.find((t) => t.address?.toLowerCase() === address);
+  return tokens.find((t) => t.address?.toLowerCase() === address);
 }
 
 /**
@@ -50,25 +65,31 @@ function fromRegistry(token: bigint): Token | undefined {
  * question, and a row that shows the wrong number of zeros is an answer that
  * happens to be false.
  */
-export async function tokenMetaFor(token: bigint): Promise<TokenMeta | null> {
-  const cached = learned.get(token);
+export async function tokenMetaFor(
+  token: bigint,
+  network: Network,
+): Promise<TokenMeta | null> {
+  const key = cacheKey(network, token);
+  const cached = learned.get(key);
   if (cached) return cached;
 
-  const curated = fromRegistry(token);
+  const curated = fromRegistry(network, token);
   if (curated) {
     const meta: TokenMeta = { ...curated, token, curated: true };
-    learned.set(token, meta);
+    learned.set(key, meta);
     return meta;
   }
 
   if (token === 0n) return null;
   const address = fieldToAddress(token);
 
+  const client = clientFor(network);
+
   try {
     const [symbol, decimals, name] = await Promise.all([
-      publicClient.readContract({ address, abi: ERC20_ABI, functionName: "symbol" }),
-      publicClient.readContract({ address, abi: ERC20_ABI, functionName: "decimals" }),
-      publicClient.readContract({ address, abi: ERC20_ABI, functionName: "name" }).catch(() => ""),
+      client.readContract({ address, abi: ERC20_ABI, functionName: "symbol" }),
+      client.readContract({ address, abi: ERC20_ABI, functionName: "decimals" }),
+      client.readContract({ address, abi: ERC20_ABI, functionName: "name" }).catch(() => ""),
     ]);
 
     const meta: TokenMeta = {
@@ -78,16 +99,16 @@ export async function tokenMetaFor(token: bigint): Promise<TokenMeta | null> {
       decimals: Number(decimals),
       curated: false,
     };
-    learned.set(token, meta);
+    learned.set(key, meta);
     return meta;
   } catch {
-    /* A token that will not say what it is on the chain this build runs against
+    /* A token that will not say what it is on the chain this session is reading
        is not a token this client can put an amount beside. */
     return null;
   }
 }
 
 /** The explorer link for a token, for a row that has to name one it does not know. */
-export function explorerFor(token: bigint): string {
-  return `${ACTIVE_NETWORK.explorer}/address/${fieldToAddress(token)}`;
+export function explorerFor(token: bigint, network: Network): string {
+  return `${network.explorer}/address/${fieldToAddress(token)}`;
 }

@@ -12,7 +12,7 @@ npm run build      # static export to out/
 npm run preview    # serve out/ the way it will actually be served
 npm run lint       # includes the architecture rules below
 npm run typecheck
-npm test           # config, keys, note ciphers, probe wallet choice, sign in plumbing, architecture rules. all offline
+npm test           # config, keys, note ciphers, history arithmetic, probe wallet choice, sign in plumbing, architecture rules. all offline
 npm run probe:chain     # can this build reach its chain, and what will each RPC serve
 npm run probe:turnkey   # asks a real Turnkey org the one question the tests cannot
 npm run probe:export    # takes a key out of the enclave. throwaway wallets only
@@ -24,7 +24,7 @@ organization API key, which lives on a laptop and never in this app. Set
 both probes compare bytes against a frozen value, so they refuse to choose a
 subject by position rather than risk reporting on the wrong key.
 
-Copy `.env.example` to `.env.local`. It holds the chain this build runs against
+Copy `.env.example` to `.env.local`. It holds the chain a session opens on
 and the two public ids sign in needs, and nothing in it is a secret. Without the
 ids the app still runs and every screen behind the door is still reachable with
 `SKIP_LOGIN`; what you lose is the Google button, which says it has no
@@ -59,12 +59,13 @@ rotating anything. Turnkey protects the EOA key inside an enclave. It cannot
 protect this one, because a ZK proof has to be built where the secret is, and
 that is the browser.
 
-## Which chain a build runs on
+## Which chain a session reads
 
-`NEXT_PUBLIC_COWL_NETWORK`, one of the keys in `config/networks.ts`. **Left unset
-it is testnet**, and the asymmetry is deliberate: a build that forgot to name a
-network runs against the chain where a mistake costs nothing, and reaching
-mainnet takes somebody typing its name.
+`NEXT_PUBLIC_COWL_NETWORK`, one of the keys in `config/networks.ts`, decides
+which chain a session **opens** on. **Left unset it is testnet**, and the
+asymmetry is deliberate: a build that forgot to name a network runs against the
+chain where a mistake costs nothing, and reaching mainnet takes somebody typing
+its name.
 
 **A name this build does not know fails `npm run build`.** The check runs at
 module load, which under `output: "export"` is during prerender, so a typo takes
@@ -73,11 +74,29 @@ paying a build error to avoid: a build meant for mainnet that quietly landed on
 testnet reads an empty pool, and an empty pool looks exactly like an account
 with no money in it.
 
-`ACTIVE_NETWORK` is the only answer to which chain this build is on, and there is
-one of it. `NETWORKS` stays beside it because the payer's screen asks a different
-question, whether a link names a chain this build knows **at all**, and that one
-has to look past the active network or a testnet request is unreadable in a
-mainnet build rather than refused in words.
+**From 2026-08-14 the bar carries a chain picker, so the chain in force is a
+runtime value.** `lib/network.tsx` holds it and `useNetwork()` is the only way to
+read it. Everything that touches a chain takes a network as an argument now:
+`clientFor`, `transportFor`, `tokensFor`, `scanPool`, `tokenMetaFor`. The
+constant is called `DEFAULT_NETWORK` rather than `ACTIVE_NETWORK` for that
+reason, because a module reading it inside the app compiles, names a real chain,
+and goes on naming the one the session has already left.
+
+Switching **rescans**. `useShieldedBook` carries the chain its result was for
+alongside the account, so a scan that lands after a switch is discarded rather
+than rendered under a bar that now names the other network: an empty pool and a
+funded one both render as zero, and the label is the only thing telling them
+apart.
+
+The choice is **not written down**. This app persists nothing, so a reload opens
+on the network the build named. A cookie or a query parameter would be the same
+storage the no-persistence rule refuses, and a chain selection in a URL survives
+being pasted into somebody else's window.
+
+`NETWORKS` stays exported beside all of it because the payer's screen asks a
+different question, whether a link names a chain this build knows **at all**, and
+that one has to look past the current selection or a testnet request is
+unreadable in a mainnet build rather than refused in words.
 
 **`config/tokens.ts` is where decimals live, per network, and nowhere else.**
 Decimals decide where the point goes, so an entry wrong by one is wrong by a
@@ -89,12 +108,58 @@ equities as plain ERC-20s, so a wired client has to learn a token from the token
 itself, and until that read exists **a token that is not in the registry is
 refused rather than guessed at**.
 
-`npm run test:config` pins all of it, 58 checks. The selection rule is tested
+`npm run test:config` pins all of it, 64 checks. The selection rule is tested
 twice on purpose, once in this process against a value it is handed and once in
 a child process with a real environment variable set, because a pure function
 nothing calls passes every test it has and still ships a build on the wrong
 chain. Addresses are checked against their own EIP-55 checksum, which is what
 catches a hand typo. Six mutants, six killed.
+
+## Where every figure on screen comes from
+
+**Nothing on any screen is invented.** The placeholder modules that carried this
+app through its layout phase are gone, along with `PREVIEW`, and each figure now
+has exactly one source:
+
+| On screen | Read from |
+| --- | --- |
+| Balances, per token | the pool's own log, replayed and trial-decrypted in the tab |
+| What one send can move | the two largest unspent notes, because a join-split reads two |
+| Activity rows | the same replay, grouped by transaction and netted per token |
+| Dates | the block each movement landed in, never this machine's clock |
+| Dollar prices | the venue's V3 quoter, median across fee tiers |
+| The 7 day line | today's holdings with the movements since undone |
+| Send and swap fees | the relayer's own `GET /quote`, per token |
+| Swap rate | the quoter, asked about that exact pair |
+| The name in the bar | the signed in account's email, local part only |
+
+**A figure with no source is absent, never approximated.** A token the venue will
+not quote renders without a valuation; a chain whose dollars are not real, which
+is every test chain, renders no dollars at all; a movement list that cannot reach
+back seven days draws no line rather than one starting from a number nobody held.
+`npm run test:history` pins that arithmetic, including the refusals, because a
+chart that is drawable and wrong is worse on a balance screen than no chart.
+
+**Prices are asked for the whole curated registry, not for what is held.** The
+request set an RPC sees is therefore identical for everybody on a network. The
+CLI's explorer fallback is deliberately not ported: an HTTPS request to a third
+party naming a token, sent from the browser holding it, is the one thing this
+app's whole shape exists to avoid.
+
+### What is still not real, and why
+
+- **Nothing submits.** No proof is built anywhere in this app yet, so Send, Pay
+  and Swap compose a spend, apply every real refusal to it, and stop. That is one
+  module, not a redesign.
+- **One address, not a sequence.** Per-index derivation does not exist, so there
+  is nothing to rotate to, no previous addresses to list, no gather to quote and
+  no public funnel to issue. The copy on those surfaces says what is true today
+  rather than what the design promises.
+- **No `shield` or `unshield` rows.** The pool emits commitments, ciphers and
+  nullifiers, and a deposit is indistinguishable from a payment in all three.
+  Telling them apart means attributing a token transfer to this account's own
+  wallet address, which is the one address no screen here may read. Money in
+  reads as received, money out as sent.
 
 ## One shielded account space, shared with the dapp
 

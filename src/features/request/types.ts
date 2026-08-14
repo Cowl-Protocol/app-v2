@@ -16,13 +16,6 @@ export type RequestToken = {
   logoURI?: string;
 };
 
-/** Base units of one token, with enough beside it to print. */
-export type TokenAmount = {
-  symbol: string;
-  amount: bigint;
-  decimals: number;
-};
-
 /**
  * One address in the owner's sequence.
  *
@@ -39,16 +32,8 @@ export type TokenAmount = {
 export type ReceiveAddress = {
   index: number;
   address: string;
-  /** Already phrased. This is placeholder copy and not a clock. */
+  /** Already phrased. */
   issued: string;
-  /**
-   * What is still sitting in this address's own book.
-   *
-   * Empty means it has either never been paid or has already been gathered.
-   * The list does not distinguish the two, because a retired empty address is
-   * finished business and a row explaining that is a row about nothing.
-   */
-  holdings: TokenAmount[];
 };
 
 /**
@@ -78,21 +63,13 @@ export type FunnelAddress = {
 };
 
 /**
- * What it costs to bring several books back into one.
+ * **`GatherQuote` used to live here and is gone with the address book.**
  *
- * A gather is one relayed spend per book, and a relayed spend pays its fee out
- * of the notes it moves. So the price scales with how many addresses hold
- * something, not with how much they hold: gathering ten dust payments costs ten
- * fees, exactly as gathering ten large ones does.
- *
- * **This is on screen from the first version on purpose.** It is the standing
- * cost of one-time addresses, it lands hardest on somebody being paid small
- * amounts often, and a person who finds it only when they try to spend will
- * reasonably think the app lost their money.
+ * A gather is one relayed spend per retired address that still holds something,
+ * and both halves of that sentence need a sequence of addresses to be true of.
+ * This app derives one account per session, so there is nothing to gather, no
+ * quote to show, and no honest way to render the control that showed it. It
+ * comes back with per-index derivation, along with the reason it mattered: the
+ * cost scales with how many addresses hold something rather than with how much
+ * they hold, which lands hardest on somebody being paid small amounts often.
  */
-export type GatherQuote = {
-  /** Books holding something. One spend each. */
-  books: number;
-  /** The relayer's fee for one spend, in the token it is taken in. */
-  feeEach: TokenAmount;
-};

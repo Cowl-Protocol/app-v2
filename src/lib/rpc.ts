@@ -1,13 +1,13 @@
 /**
- * The read side of the chain, and there is only one of it.
+ * The read side of the chain, one client per network.
  *
  * **Read only, deliberately.** Nothing here can sign or send. A spend leaves
  * this app either through the relayer or through Turnkey, and both are their
  * own modules: a client that could do both would make "this call cannot move
  * money" a thing you check by reading the call site rather than the import.
  */
-import { createPublicClient, type Chain } from "viem";
-import { ACTIVE_NETWORK, ACTIVE_TOKENS, type Network, type Token } from "@/config";
+import { createPublicClient, type Chain, type PublicClient } from "viem";
+import { tokensFor, type Network, type NetworkKey, type Token } from "@/config";
 import { transportFor } from "./transport";
 
 /**
@@ -40,17 +40,32 @@ export function toViemChain(network: Network, tokens: readonly Token[]): Chain {
   };
 }
 
-export const activeChain = toViemChain(ACTIVE_NETWORK, ACTIVE_TOKENS);
-
 /**
- * One client for the whole app.
+ * One client per network, built the first time that network is asked for.
  *
- * Module scope rather than a hook or a provider. The network is fixed at build
- * time, so there is nothing for a provider to provide and nothing that can
- * change under a component. A second client would only be a second connection
- * pool with the same answers.
+ * **A function over a map, where this used to be a single module constant.**
+ * The network is a runtime choice now, so a lone client would answer for
+ * whichever chain the build opened on no matter what the bar says, and a
+ * balance read from the wrong pool comes back as zero rather than as an error.
+ *
+ * Cached rather than constructed per call, and the cache is what makes calling
+ * this from a render safe. viem's fallback transport keeps its own per-endpoint
+ * state, which is how a rate-limited node stays skipped instead of being retried
+ * on every request, and a fresh client each time would throw that away and hand
+ * the same wall of 429s to every scan.
+ *
+ * **Read only, still.** Nothing reachable from here can sign or send.
  */
-export const publicClient = createPublicClient({
-  chain: activeChain,
-  transport: transportFor(ACTIVE_NETWORK),
-});
+const clients = new Map<NetworkKey, PublicClient>();
+
+export function clientFor(network: Network): PublicClient {
+  const cached = clients.get(network.key);
+  if (cached) return cached;
+
+  const client = createPublicClient({
+    chain: toViemChain(network, tokensFor(network)),
+    transport: transportFor(network),
+  });
+  clients.set(network.key, client);
+  return client;
+}

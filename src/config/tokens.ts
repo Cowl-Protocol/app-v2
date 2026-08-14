@@ -17,7 +17,7 @@
  * Addresses are copied from `cli/src/networks.ts`, which stays the source of
  * record for anything deployed.
  */
-import { ACTIVE_NETWORK, type Network, type NetworkKey } from "./networks";
+import { type Network, type NetworkKey } from "./networks";
 
 export type Token = {
   symbol: string;
@@ -108,8 +108,17 @@ export const TOKENS: Record<NetworkKey, readonly Token[]> = {
   ],
 };
 
-/** What this build can name without asking a chain. */
-export const ACTIVE_TOKENS: readonly Token[] = TOKENS[ACTIVE_NETWORK.key];
+/**
+ * What a network can be named on without asking a chain.
+ *
+ * Takes the network rather than reading a module constant, because the network
+ * in force is a runtime choice now: the bar has a picker, and a registry frozen
+ * to whatever the build opened on would price a mainnet note against a testnet
+ * stand-in's decimals. Same reason `tokenOn` below takes one.
+ */
+export function tokensFor(network: Network): readonly Token[] {
+  return TOKENS[network.key];
+}
 
 /**
  * One token on one network, or nothing.

@@ -1,19 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { ACTIVE_NETWORK, PREVIEW } from "@/config";
+import { tokensFor } from "@/config";
 import { useAccount } from "@/features/auth";
-import {
-  CURRENT,
-  FUNNEL,
-  GATHER,
-  IS_PLACEHOLDER,
-  NEXT,
-  REQUEST_TOKENS,
-  RETIRED,
-} from "../lib/placeholder";
-import type { TokenAmount } from "../types";
-import { AddressBook } from "./address-book";
+import { useNetwork } from "@/lib/network";
 import { FunnelPanel } from "./funnel-panel";
 import { ReceivePanel } from "./receive-panel";
 import { ReceiveTabs, type ReceiveTab } from "./receive-tabs";
@@ -26,9 +16,8 @@ import { RequestPanel } from "./request-panel";
  * about addresses, rotation or gathering. **That direction is the point.** An
  * address sequence is this feature's business, and a portfolio screen that had
  * to be handed one would have to be edited every time the sequence changed shape.
- * Wiring stays inside this file and the panels below it stay presentational, so
- * when the shielded book arrives the work is deleting `lib/placeholder` and
- * satisfying the same props.
+ * Wiring lives in this file and the panels below it stay presentational, which
+ * is what let the placeholder module be deleted without touching one of them.
  *
  * **Two tabs, split by who is paying.** "From Cowl" hands out the one-time
  * `zcowl1…`; "From anywhere" holds the payment link and the plain `0x` funnel
@@ -39,44 +28,38 @@ import { RequestPanel } from "./request-panel";
  * The open dialog and the active tab are component state and nothing else.
  * Writing either down would mean browser storage, which this app does not use
  * for anything, and neither is worth being the exception that opens that door.
- */
-
-type Dialog = null | "request" | "addresses";
-
-/**
- * Stands in for the payment that caused the current address to be current.
  *
- * There is no chain here, so nothing can actually arrive, and this is reachable
- * only through `PREVIEW`. It is a real state with a real design and a few
- * seconds of life, and a state nobody can put on screen is a state that gets
- * designed wrong.
+ * **Everything on it is the session's own, or it is absent.** The placeholder
+ * module this file used to import is gone, along with the sample addresses it
+ * built: they were real bech32m over a fixed phrase, which made them scannable,
+ * and a scannable code is one a stranger can pay into a book whose spending key
+ * exists in no wallet on earth. Nothing here can render an address the signed in
+ * account does not hold.
  */
-const SAMPLE_RECEIPT: TokenAmount = {
-  symbol: "USDG",
-  amount: 250_000_000n,
-  decimals: 6,
-};
+
+type Dialog = null | "request";
 
 export function ReceiveCard() {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [tab, setTab] = useState<ReceiveTab>("cowl");
   const account = useAccount();
+  const network = useNetwork();
 
   const tabs = <ReceiveTabs active={tab} onSelect={setTab} />;
 
   /*
-    The first real thing on this screen.
+    The session's own `zcowl1…`, derived in this tab, or nothing.
 
-    A signed in session derives its own `zcowl1…`, so the panel shows that one
-    and the SAMPLE tag comes off, because the address is genuinely payable and
-    the money genuinely arrives. Without a session, which is every `SKIP_LOGIN`
-    render, it falls back to the placeholder that is built from a fixed phrase
-    and stays labelled as a sample.
+    **One address, not a sequence, and the panel now says so.** A session derives
+    one account today: per-index derivation does not exist, so there is no next
+    address to hand out and no previous ones to list. The rotation this product
+    is designed around is a real thing that has not shipped, and a panel that
+    printed "one time" over an address it reuses would be selling it before it
+    is true.
 
-    **No retired addresses, and that is the truth rather than a stub.** One
-    session derives one account today. The one-time sequence needs per-index
-    derivation, which does not exist yet, and printing "4 previous addresses"
-    beside a real address would be inventing a history this account has not got.
+    Null is the `SKIP_LOGIN` case and only that. It renders as a panel with no
+    code on it rather than as a sample, because a sample that scans is a sample
+    somebody can pay.
   */
   const live = account
     ? { index: 0, address: account.paymentAddress, issued: "Current", holdings: [] }
@@ -86,46 +69,31 @@ export function ReceiveCard() {
     <>
       {tab === "cowl" ? (
         <ReceivePanel
-          address={live ?? CURRENT}
-          retiredCount={live ? 0 : RETIRED.length}
-          justReceived={PREVIEW === "paid" ? SAMPLE_RECEIPT : undefined}
+          address={live}
           onRequest={() => setDialog("request")}
-          onOpenAddresses={() => setDialog("addresses")}
           tabs={tabs}
-          sample={live ? false : IS_PLACEHOLDER}
         />
       ) : (
         <FunnelPanel
-          funnel={FUNNEL}
-          networkLabel={ACTIVE_NETWORK.label}
-          onRequest={() => setDialog("request")}
+          networkLabel={network.label}
+          onRequest={live ? () => setDialog("request") : undefined}
           tabs={tabs}
-          sample={IS_PLACEHOLDER}
         />
       )}
 
-      {dialog === "request" && (
+      {dialog === "request" && live && (
         <RequestPanel
           /*
-            The next address off the sequence, never the one already on the QR
-            behind this dialog. One sequence, and every hand-out takes the next
-            index: an invoice and the standing code sharing a string would put
-            the same address in two strangers' hands, which is the one thing
-            rotation exists to stop.
+            The address on the QR behind this dialog, because it is the only one
+            this account has. When rotation ships this takes the next index off
+            the sequence instead, and the reason it must is worth keeping here:
+            an invoice and the standing code sharing a string put the same
+            address in two strangers' hands.
           */
-          address={NEXT}
-          tokens={REQUEST_TOKENS}
-          chainId={ACTIVE_NETWORK.chainId}
-          networkLabel={ACTIVE_NETWORK.label}
-          onClose={() => setDialog(null)}
-          sample={IS_PLACEHOLDER}
-        />
-      )}
-
-      {dialog === "addresses" && (
-        <AddressBook
-          addresses={RETIRED}
-          gather={GATHER}
+          address={live}
+          tokens={[...tokensFor(network)]}
+          chainId={network.chainId}
+          networkLabel={network.label}
           onClose={() => setDialog(null)}
         />
       )}

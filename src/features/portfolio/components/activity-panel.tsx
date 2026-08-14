@@ -8,7 +8,9 @@ import type { Activity, ActivityKind } from "../types";
  *
  * This list is assembled from notes only this browser can decrypt, so it is
  * private in the strict sense: nobody else can produce it, and no server here
- * holds it. It is still not a chain history and must never be presented as one.
+ * holds it. Every row is one transaction from the pool's own log, netted per
+ * token, dated by the block it landed in. It is still not a chain history and
+ * must never be presented as one.
  * A shield and a withdraw are visible to anyone watching the pool's boundary,
  * and no badge in this panel changes that. Saying it in a row would also be a
  * warning arriving after the action, which is the least useful moment for it.
@@ -42,9 +44,27 @@ const INBOUND: ActivityKind[] = ["receive", "shield"];
  */
 const SHOWN = 4;
 
-export function ActivityPanel({ items }: { items: Activity[] }) {
+export function ActivityPanel({
+  items,
+  reading = false,
+}: {
+  items: Activity[];
+  /** A scan is in flight, so an empty list is not yet an answer. */
+  reading?: boolean;
+}) {
   return (
     <Panel label="Activity" square bodyClassName="px-0 pb-0" className="h-full min-w-0">
+      {/*
+        Nothing yet, said in the two ways it can be true. A book with no
+        movements and a book nobody has finished reading look identical, and only
+        one of them means this account has never been paid.
+      */}
+      {items.length === 0 && (
+        <p className="border-t border-white/[0.05] px-4 py-8 text-center text-[12px] text-bone/35">
+          {reading ? "Reading the chain." : "Nothing has moved yet."}
+        </p>
+      )}
+
       <ul className="divide-y divide-white/[0.05] border-t border-white/[0.05]">
         {items.slice(0, SHOWN).map((it) => {
           const inbound = INBOUND.includes(it.kind);
@@ -93,12 +113,19 @@ export function ActivityPanel({ items }: { items: Activity[] }) {
         })}
       </ul>
 
-      <button
-        type="button"
-        className="mt-auto w-full border-t border-white/[0.05] py-3 font-mono text-[10.5px] tracking-[0.18em] text-bone/40 uppercase transition-colors hover:bg-white/[0.02] hover:text-mark"
-      >
-        All activity
-      </button>
+      {/*
+        Only when there is something behind it. A list of four with nothing under
+        it does not need a way in, and a control that opens an empty screen is
+        worse than no control.
+      */}
+      {items.length > SHOWN && (
+        <button
+          type="button"
+          className="mt-auto w-full border-t border-white/[0.05] py-3 font-mono text-[10.5px] tracking-[0.18em] text-bone/40 uppercase transition-colors hover:bg-white/[0.02] hover:text-mark"
+        >
+          All activity
+        </button>
+      )}
     </Panel>
   );
 }

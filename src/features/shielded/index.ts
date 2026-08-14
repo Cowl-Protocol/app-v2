@@ -13,6 +13,7 @@
  * viewing key, which only this feature and `auth` may hold, so what crosses this
  * line is the money it found and never the key that found it.
  */
-export { useShieldedBook, type Book, type Holding } from "./lib/use-book";
+export { useShieldedBook, type Book, type Holding, type Move } from "./lib/use-book";
+export { type MovementKind } from "./lib/history";
 export { SendOverlay, type SendStage } from "./components/send-overlay";
 export { SwapOverlay } from "./components/swap-overlay";

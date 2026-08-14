@@ -11,10 +11,11 @@
     "test:config": "tsx scripts/configcheck.mts",
     "test:keys": "tsx scripts/keycheck.mts",
     "test:notes": "tsx scripts/notecheck.mts",
+    "test:history": "tsx scripts/historycheck.mts",
     "test:wallet": "tsx scripts/walletcheck.mts",
     "test:auth": "tsx scripts/authcheck.mts",
     "test:boundary": "node scripts/boundarycheck.mjs",
-    "test": "npm run test:config && npm run test:keys && npm run test:notes && npm run test:wallet && npm run test:auth && npm run test:boundary",
+    "test": "npm run test:config && npm run test:keys && npm run test:notes && npm run test:history && npm run test:wallet && npm run test:auth && npm run test:boundary",
     "probe:chain": "tsx scripts/chainprobe.mts",
     "probe:export": "tsx scripts/exportprobe.mts",
     "probe:turnkey": "tsx scripts/turnkeyprobe.mts"

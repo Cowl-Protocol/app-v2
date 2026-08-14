@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Eyes } from "@/components/brand/eyes";
+import { NetworkSelect } from "@/components/layout/network-select";
 import { Bevel, tagClip } from "@/components/ui/bevel";
 import { cn } from "@/lib/utils";
 import type { Profile } from "@/types";
@@ -7,10 +8,11 @@ import type { Profile } from "@/types";
 /**
  * The bar across the top of every signed in screen.
  *
- * **Layout only. Nothing here is wired**, including the nav, which renders as
- * text with one item marked current rather than as links to routes that do not
- * exist yet. A dead link is worse than an obviously unfinished one: it looks
- * like the app is broken instead of like it is being built.
+ * **The chain picker is the one wired thing on it.** The nav is still text with
+ * one item marked current rather than links to routes that do not exist yet, and
+ * the account button still opens nothing. A dead link is worse than an obviously
+ * unfinished one: it looks like the app is broken instead of like it is being
+ * built.
  *
  * The rail is the bar's whole structure. It runs out of the mark's bracket box,
  * crosses the empty space, meets the nav at a point, comes out the far side and
@@ -19,14 +21,14 @@ import type { Profile } from "@/types";
  * to be in the way, which is the difference between an instrument panel and a
  * row of buttons with a line behind them.
  *
- * **The bar names no chain and no address.** It carried a network chip, and it
- * came out on the owner's call. Worth writing down rather than losing: nothing
- * on this screen now distinguishes testnet from mainnet, and a testnet balance
- * read as real money is the one mistake that chip prevented. If it comes back it
- * should come back as a warning that appears only on a test chain, since on
- * mainnet there was never anything to say.
+ * **The bar names a chain again, and this time it changes one.** The old chip
+ * was a label and it came out on the owner's call; what replaced it on
+ * 2026-08-14 is `NetworkSelect`, which owns the network the whole session reads
+ * from. The argument for having it is the one the old chip had, that nothing
+ * else on this screen tells a testnet balance from real money, and the argument
+ * for it being a control is that the alternative was a rebuild per chain.
  *
- * It never showed a wallet address either. This app provisions the wallet, and
+ * **The bar still names no address.** This app provisions the wallet, and
  * somebody who signed in with Google has no reason to be handed a hex string
  * they did not choose and cannot use. The address that matters to them is the
  * `zcowl1…` one on the Receive panel, and it is the only one they ever give out.
@@ -36,7 +38,7 @@ const NAV = ["Home", "Activity", "Settings"] as const;
 
 const TAG = tagClip();
 
-export function AppBar({ profile }: { profile: Profile }) {
+export function AppBar({ profile }: { profile: Profile | null }) {
   return (
     /*
       Full width inside the frame rather than boxed to the content column. The
@@ -86,8 +88,21 @@ export function AppBar({ profile }: { profile: Profile }) {
 
       <Rule />
 
-      <div className="ml-auto flex min-w-0 items-center md:ml-0">
-        <ProfileButton profile={profile} />
+      {/*
+        The chain sits to the left of the account, which is the order the two
+        are decided in: which chain is being read, then who is reading it. Both
+        collapse toward the mark on a phone, and the gap is small enough that
+        they read as one cluster rather than as two unrelated controls that
+        happen to share an edge.
+      */}
+      <div className="ml-auto flex min-w-0 items-center gap-2 md:ml-0">
+        <NetworkSelect />
+        {/*
+          No account, no account control. That is the `SKIP_LOGIN` layout case
+          and nothing else, and a chip showing initials nobody has would open a
+          menu about a session that does not exist.
+        */}
+        {profile && <ProfileButton profile={profile} />}
       </div>
     </header>
   );

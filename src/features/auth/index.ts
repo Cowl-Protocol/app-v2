@@ -4,7 +4,10 @@
  * Other features import this file and nothing deeper. Everything not exported
  * here is free to move, rename, or disappear without touching another feature.
  *
- * The gate and the relay are the two things a route renders. The login card and
+ * The gate, the relay and the top bar are what a route renders. The bar is here
+ * rather than in `components/layout` because the only dynamic thing on it is the
+ * account, which is this feature's; the layout primitive it wraps still knows
+ * nothing about sessions. The login card and
  * the screen around it stay private: nothing outside this feature should be able
  * to put a sign in form on screen without going through the thing that decides
  * whether one is needed.
@@ -22,5 +25,6 @@
  * the second one.
  */
 export { AuthGate } from "./components/auth-gate";
+export { SessionBar } from "./components/session-bar";
 export { OAuthRelay } from "./components/oauth-relay";
 export { useAccount, useSignOut } from "./lib/account-context";

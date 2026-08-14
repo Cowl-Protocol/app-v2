@@ -1,6 +1,7 @@
 import type { SelectableToken } from "@/components/ui/token-select";
 import { formatAmount } from "@/lib/format";
-import type { PriceTable, SpendableToken } from "../types";
+import type { Prices } from "@/lib/price";
+import type { SpendableToken } from "../types";
 
 /**
  * The book, shaped for the picker: balance on the right, its dollar value
@@ -8,10 +9,10 @@ import type { PriceTable, SpendableToken } from "../types";
  * here so the picker itself never learns what a balance is — it renders
  * strings, and staying that ignorant is what lets `request` share it.
  */
-export function pickerRows(book: SpendableToken[], prices: PriceTable): SelectableToken[] {
+export function pickerRows(book: SpendableToken[], prices: Prices): SelectableToken[] {
   return book.map((t) => {
     const whole = Number(formatAmount(t.balance, t.decimals).replace(/,/g, ""));
-    const price = prices[t.symbol];
+    const price = prices.get(t.token);
     return {
       symbol: t.symbol,
       name: t.name,

@@ -2,20 +2,30 @@
 
 import { useRef, useState } from "react";
 import { Alert } from "@/components/ui/alert";
-import { ACTIVE_NETWORK, PREVIEW } from "@/config";
 import { ReceiveCard } from "@/features/request";
 import { SendOverlay, SwapOverlay, useShieldedBook } from "@/features/shielded";
+import { useNow } from "@/hooks/use-now";
+import { useNetwork } from "@/lib/network";
+import { usePrices } from "@/lib/price";
+import { relativeTime, toActivity } from "../lib/activity";
 import { toAssets } from "../lib/holdings";
-import { ACTIVITY, ARRIVING, ASSETS, STATUS, TRACE } from "../lib/placeholder";
+import { totalUsd, traceOf } from "../lib/trace";
 import { ActivityPanel } from "./activity-panel";
-import { ArrivalStrip } from "./arrival-strip";
 import { AssetTable } from "./asset-table";
 import { BalancePanel } from "./balance-panel";
 import type { Verb } from "./quick-actions";
 import { StatusStrip } from "./status-strip";
 
 /**
- * The signed in home screen. **Layout only, wired to nothing.**
+ * The signed in home screen.
+ *
+ * **Every figure on it comes off the chain.** The balances are notes this
+ * browser decrypted out of the pool's own log, the movements are the same
+ * replay grouped by transaction, the prices are the venue's quoter, and the
+ * dollar total is those two multiplied. Nothing on this screen is stored, and
+ * nothing on it is invented: the placeholder module this file used to import is
+ * gone, and what a figure cannot be sourced from is rendered as absent rather
+ * than filled in.
  *
  * Two columns, and the split is the argument. Balance and assets take the wide
  * side because that is what somebody opens this app to look at. Receive takes
@@ -59,20 +69,47 @@ export function HomeScreen() {
   const [receiveFlash, setReceiveFlash] = useState(false);
   const receiveRef = useRef<HTMLDivElement>(null);
   const flashTimer = useRef<number | undefined>(undefined);
+  const network = useNetwork();
   const book = useShieldedBook();
+  const prices = usePrices();
+  const now = useNow();
 
   /*
-    Three sources, and the middle one is the point.
+    One source, and everything on the screen is derived from it.
 
-    A signed in session renders what the chain says it holds. `locked` is the
-    layout case, `SKIP_LOGIN` with no account behind it, and it keeps the
-    placeholder so a screen can still be worked on. **Everything else renders
-    nothing**, deliberately: while a scan is in flight or after it failed, the
-    placeholder would be four invented balances sitting exactly where four real
-    ones go, and nobody looking at them could tell.
+    Anything other than a finished scan renders **nothing**, deliberately. While
+    a scan is in flight, or after one failed, a stand-in figure would sit exactly
+    where a real one goes and nobody looking at it could tell. An empty screen
+    that says it is reading is the honest version of not knowing yet.
   */
-  const assets =
-    book.state === "ready" ? toAssets(book.holdings) : book.state === "locked" ? ASSETS : [];
+  const ready = book.state === "ready" ? book : null;
+  const assets = ready ? toAssets(ready.holdings, prices) : [];
+  const total = ready ? totalUsd(ready.holdings, prices) : null;
+  const activity = ready ? toActivity(ready.movements, now) : [];
+  const points = ready
+    ? traceOf({
+        holdings: ready.holdings,
+        movements: ready.movements,
+        prices,
+        coversWindow: ready.coversWindow,
+        now,
+      })
+    : [];
+
+  /*
+    Why there is no dollar figure, when there is none.
+
+    A test chain is the common case and it is not a failure: its USDG is a
+    stand-in for a venue to route through, and pricing a rehearsal balance in
+    dollars is how a rehearsal gets mistaken for money. The other case is a real
+    chain whose venue will not quote what is held, which is a fact about the
+    pools rather than about the balance.
+  */
+  const unpriced = !ready
+    ? undefined
+    : network.testnet
+      ? "Test chain. Nothing here is priced in dollars."
+      : "Nothing on this chain will price what you hold.";
 
   function onAction(verb: Verb) {
     if (verb === "Send") setDialog("send");
@@ -102,18 +139,6 @@ export function HomeScreen() {
     <div className="mx-auto w-full max-w-[1180px] px-5 pb-6 md:px-7">
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
         {/*
-          The automatic move, above everything, for the seconds it exists. It
-          spans the row rather than living inside a panel because it is about
-          the balance and the receive card at once, and parking it in either
-          would read as belonging to that panel's own content.
-        */}
-        {PREVIEW === "arriving" && (
-          <div className="lg:col-span-12">
-            <ArrivalStrip {...ARRIVING} />
-          </div>
-        )}
-
-        {/*
           A scan that failed, said out loud and at the top.
 
           The alternative is a screen that reads as an empty account, and the
@@ -133,7 +158,10 @@ export function HomeScreen() {
 
         <div className="lg:col-span-8">
           <BalancePanel
-            points={TRACE}
+            total={total}
+            points={points}
+            unpricedNote={total === null ? unpriced : undefined}
+            reading={book.state === "scanning"}
             hidden={hidden}
             onToggleHidden={() => setHidden((v) => !v)}
             onAction={onAction}
@@ -152,19 +180,24 @@ export function HomeScreen() {
         </div>
 
         <div className="lg:col-span-4">
-          <ActivityPanel items={ACTIVITY} />
+          <ActivityPanel items={activity} reading={book.state === "scanning"} />
         </div>
 
         <div className="lg:col-span-12">
-          <StatusStrip status={STATUS} />
+          <StatusStrip
+            status={{
+              synced: ready ? relativeTime(Math.floor(ready.at / 1000), now) : null,
+              integrity: ready?.integrity.kind ?? null,
+            }}
+          />
         </div>
       </div>
 
       {dialog === "send" && (
-        <SendOverlay mode="send" chainId={ACTIVE_NETWORK.chainId} onClose={() => setDialog(null)} />
+        <SendOverlay mode="send" chainId={network.chainId} onClose={() => setDialog(null)} />
       )}
       {dialog === "pay" && (
-        <SendOverlay mode="pay" chainId={ACTIVE_NETWORK.chainId} onClose={() => setDialog(null)} />
+        <SendOverlay mode="pay" chainId={network.chainId} onClose={() => setDialog(null)} />
       )}
       {dialog === "swap" && <SwapOverlay onClose={() => setDialog(null)} />}
     </div>

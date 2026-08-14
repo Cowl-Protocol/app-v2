@@ -32,7 +32,6 @@ import type { PayRefusal, PayStage, ResolvedRequest } from "../types";
 export function PayScreen({
   request,
   stage = { kind: "ready" },
-  sample = false,
 }: {
   request: ResolvedRequest;
   stage?: PayStage;
@@ -43,7 +42,6 @@ export function PayScreen({
    * when it is reached without a link. A request screen that looks live and is
    * not is worse than an empty one, and this screen carries a Pay button.
    */
-  sample?: boolean;
 }) {
   const { payload, network, amount, decimals, dust } = request;
 
@@ -52,7 +50,6 @@ export function PayScreen({
       <Panel
         label="Payment request"
         tone="mark"
-        aside={sample ? <SampleTag /> : undefined}
       >
         <p className="pt-2 text-center font-mono text-[34px] leading-none tabular-nums text-bone">
           {formatAmount(amount, decimals)}
@@ -229,6 +226,28 @@ const REFUSAL: Record<PayRefusal, string> = {
     "This request names a token this app cannot read. Ask for it in a different one.",
 };
 
+/**
+ * No link in the address bar, which is not a refusal of anything.
+ *
+ * Its own component rather than a fifth `PayRefusal`, because the refusal panel
+ * says "Cannot be paid" and "Nothing was sent", and both are answers to a
+ * question this visitor never asked. They typed an address, or a chat app ate
+ * the fragment off a link somebody sent them.
+ */
+export function PayNeedsLink() {
+  return (
+    <Frame>
+      <Panel label="Payment link needed">
+        <p className="pt-1 text-[13px] leading-relaxed text-bone/60">
+          This page opens a payment link. Ask whoever is charging you to send
+          theirs again, in full · the part after the # is the request itself, and
+          some apps cut it off.
+        </p>
+      </Panel>
+    </Frame>
+  );
+}
+
 export function PayRefused({ reason }: { reason: PayRefusal }) {
   return (
     <Frame>
@@ -275,14 +294,6 @@ function Frame({ children }: { children: React.ReactNode }) {
         </p>
       </div>
     </main>
-  );
-}
-
-function SampleTag() {
-  return (
-    <span className="bg-white/[0.07] px-2 py-1 font-mono text-[9.5px] tracking-[0.2em] text-bone/55 uppercase">
-      Sample
-    </span>
   );
 }
 

@@ -8,6 +8,13 @@
 
 /** A token as a spend flow needs it: what is held, and what one send can move. */
 export type SpendableToken = {
+  /**
+   * The pool's token id, which is what a price table and a fee quote are keyed
+   * by. Never the ticker: a token chooses its own symbol, and one calling itself
+   * USDG would otherwise be handed the Global Dollar's price and the Global
+   * Dollar's fee.
+   */
+  token: bigint;
   symbol: string;
   /** Display name for picker rows. */
   name?: string;
@@ -24,10 +31,22 @@ export type SpendableToken = {
    * note count came off the status strip, and this field is its carrier.
    */
   ceiling: bigint;
-  /** The relayer's fee for one spend, taken from what is sent. Base units. */
-  fee: bigint;
+  /**
+   * The relayer's fee for one spend, taken from what is sent. Base units.
+   *
+   * **Null until the relayer has said**, which it is asked directly, per token,
+   * whenever a spend surface is open. It was a constant here for as long as this
+   * feature had a placeholder, and a constant is the one thing this number must
+   * never be: it is gas priced in the token being sent, so it moves with the
+   * chain, and a send composed against a stale figure is refused after its proof
+   * is built.
+   */
+  fee: bigint | null;
   logoURI?: string;
 };
 
-/** USD per whole token, for the swap's placeholder arithmetic. */
-export type PriceTable = Record<string, number>;
+/**
+ * **`PriceTable` used to live here** as a symbol-keyed map of made-up dollars.
+ * Prices come from `@/lib/price` now, keyed by the pool's token id and read from
+ * the venue's own quoter, so there is nothing left for this feature to define.
+ */

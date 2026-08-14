@@ -10,7 +10,7 @@
  * refuses, is the next one worth asking?**
  */
 import { fallback, http } from "viem";
-import { ACTIVE_NETWORK, type Network } from "@/config";
+import { type Network } from "@/config";
 
 /**
  * Recognised by hostname rather than by position in the list. The ordering in
@@ -70,12 +70,17 @@ export function endpointsFor(network: Network): string[] {
 /**
  * One transport for a network, built from its ordered endpoint list.
  *
+ * The network is an argument with no default. It used to fall back to the one
+ * the build named, which is a shape that stops being safe the moment a session
+ * can switch chains: an omitted argument would then read the right endpoints
+ * for the wrong pool.
+ *
  * Patience is for a last resort. The explorer's spaced retries are right when
  * there is nothing after it and wasteful when there is: three rounds is ten
  * seconds spent on a node that has already said no, per request, on a replay
  * that makes many.
  */
-export function transportFor(network: Network = ACTIVE_NETWORK) {
+export function transportFor(network: Network) {
   const urls = endpointsFor(network);
 
   return fallback(

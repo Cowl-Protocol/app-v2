@@ -14,16 +14,19 @@
  * Reads only. Nothing here can sign, send, or cost gas.
  */
 import { createPublicClient, http } from "viem";
-import { ACTIVE_NETWORK, ACTIVE_TOKENS } from "../src/config";
+import { DEFAULT_NETWORK, tokensFor } from "../src/config";
 import { fieldToHex } from "../src/lib/field";
 import { POOL_ABI } from "../src/features/shielded/lib/pool-abi";
 import { balanceOf, scanPool } from "../src/features/shielded/lib/scan";
 import { randomField } from "../src/lib/field";
-import { publicClient, toViemChain } from "../src/lib/rpc";
+import { clientFor, toViemChain } from "../src/lib/rpc";
 import { endpointsFor } from "../src/lib/transport";
 
-const net = ACTIVE_NETWORK;
-const chain = toViemChain(net, ACTIVE_TOKENS);
+/* The build's own network. A probe of a chain nobody's build points at would
+   pass while the deployment it is standing in for could not reach anything. */
+const net = DEFAULT_NETWORK;
+const chain = toViemChain(net, tokensFor(net));
+const publicClient = clientFor(net);
 
 let failures = 0;
 
@@ -171,7 +174,10 @@ console.log("\nThe scan, against a key nobody owns");
 
 try {
   const started = Date.now();
-  const result = await scanPool({ mpk: randomField(), nk: randomField(), viewPriv: randomField() });
+  const result = await scanPool(
+    { mpk: randomField(), nk: randomField(), viewPriv: randomField() },
+    net,
+  );
   const took = Date.now() - started;
 
   if (result.integrity.kind === "complete") {

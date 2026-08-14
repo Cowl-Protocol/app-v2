@@ -37,9 +37,15 @@ export function RequestPanel({
   chainId,
   networkLabel,
   onClose,
-  sample = false,
 }: {
-  /** The fresh address this request will be paid into. */
+  /**
+   * The address this request is paid into: the session's own, always real.
+   *
+   * It used to be allowed to be a placeholder, with a "pays nobody" tag on the
+   * finished link to say so. Nothing here can build a link to an address the
+   * signed in account does not hold, so the tag and the state behind it are
+   * gone.
+   */
   address: ReceiveAddress;
   tokens: RequestToken[];
   /**
@@ -53,7 +59,6 @@ export function RequestPanel({
   chainId: number;
   networkLabel: string;
   onClose: () => void;
-  sample?: boolean;
 }) {
   const [token, setToken] = useState<RequestToken>(tokens[0]!);
   const [typed, setTyped] = useState("");
@@ -101,7 +106,6 @@ export function RequestPanel({
           payload={created.payload}
           link={created.link}
           networkLabel={networkLabel}
-          sample={sample}
           onAgain={() => {
             setCreated(null);
             setTyped("");
@@ -233,13 +237,11 @@ function CreatedView({
   payload,
   link,
   networkLabel,
-  sample,
   onAgain,
 }: {
   payload: RequestPayload;
   link: string;
   networkLabel: string;
-  sample: boolean;
   onAgain: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -256,12 +258,6 @@ function CreatedView({
 
   return (
     <>
-      {sample && (
-        <p className="mb-3 bg-white/[0.05] px-3 py-2 font-mono text-[10px] tracking-[0.14em] text-bone/50 uppercase">
-          Sample · pays nobody
-        </p>
-      )}
-
       <div className="flex justify-center">
         <QrCode text={link} className="w-full max-w-[200px]" />
       </div>

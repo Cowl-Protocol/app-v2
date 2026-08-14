@@ -6,8 +6,17 @@ import type { FunnelAddress } from "../types";
 import { QrCode } from "./qr-code";
 
 /**
- * Receive, for senders that are not Cowl users. **Layout only, wired to
- * nothing.**
+ * Receive, for senders that are not Cowl users.
+ *
+ * **Half of this tab is live and half of it is not, and the panel says which.**
+ * The payment link is real: it names the session's own address and the chain in
+ * force, and anybody who clicks it pays straight into this balance. The plain
+ * `0x` funnel underneath is not, because a funnel is a derived wallet address at
+ * index 1 and up, and this app provisions exactly one account today. So the
+ * address block renders only when there is a real address to put in it, and
+ * otherwise the panel says what is missing in a sentence. It used to render a
+ * sample: an EIP-55 string hashed from a fixed phrase, which an exchange form
+ * accepts and pays into a wallet nobody holds the key to.
  *
  * Two artifacts, and the order is the argument. The payment link comes first
  * because a person clicking it pays from their own wallet straight into the
@@ -29,27 +38,21 @@ import { QrCode } from "./qr-code";
  */
 
 export function FunnelPanel({
-  funnel,
+  funnel = null,
   networkLabel,
   onRequest,
   tabs,
-  sample = false,
 }: {
-  funnel: FunnelAddress;
+  /** The session's own public funnel, or null while none is derived. */
+  funnel?: FunnelAddress | null;
   networkLabel: string;
   /** Opens the same request dialog the Cowl tab uses. One machine, two doors. */
-  onRequest: () => void;
+  onRequest?: () => void;
   /** The tab strip, built by the card so both panels render the same one. */
   tabs?: React.ReactNode;
-  sample?: boolean;
 }) {
   return (
-    <Panel
-      label="Receive"
-      tone="mark"
-      aside={sample ? <SampleTag /> : undefined}
-      className="h-full min-w-0"
-    >
+    <Panel label="Receive" tone="mark" className="h-full min-w-0">
       {tabs}
 
       <p className="text-[12px] leading-relaxed text-bone/45">
@@ -60,7 +63,8 @@ export function FunnelPanel({
       <button
         type="button"
         onClick={onRequest}
-        className="mt-3 h-11 w-full bg-primary font-mono text-[11px] tracking-[0.16em] text-on-primary uppercase transition-colors hover:bg-primary-hi"
+        disabled={!onRequest}
+        className="mt-3 h-11 w-full bg-primary font-mono text-[11px] tracking-[0.16em] text-on-primary uppercase transition-colors hover:bg-primary-hi disabled:bg-white/[0.06] disabled:text-bone/30"
       >
         Create a payment link
       </button>
@@ -77,23 +81,35 @@ export function FunnelPanel({
           <span className="text-bone/20"> · plain address</span>
         </p>
 
-        <AddressBlock address={funnel.address} />
+        {funnel ? (
+          <>
+            <AddressBlock address={funnel.address} />
 
-        <p className="mt-1.5 font-mono text-[10px] tracking-[0.18em] text-bone/35 uppercase">
-          {networkLabel}
-        </p>
+            <p className="mt-1.5 font-mono text-[10px] tracking-[0.18em] text-bone/35 uppercase">
+              {networkLabel}
+            </p>
 
-        {/*
-          The sequence of events, in the order the person experiences it, with
-          no property claimed for it. "Moves into your balance" is the automatic
-          session move; naming its mechanism here would spend the caption on
-          infrastructure. The last clause is the watch rule, said small: an old
-          address still lands.
-        */}
-        <p className="mt-2.5 text-[11px] leading-snug text-bone/35">
-          Lands here first, then moves into your balance next time you open the
-          app. You get a fresh one after each use · old ones keep working.
-        </p>
+            {/*
+              The sequence of events, in the order the person experiences it,
+              with no property claimed for it. "Moves into your balance" is the
+              automatic session move; naming its mechanism here would spend the
+              caption on infrastructure. The last clause is the watch rule, said
+              small: an old address still lands.
+            */}
+            <p className="mt-2.5 text-[11px] leading-snug text-bone/35">
+              Lands here first, then moves into your balance next time you open
+              the app. You get a fresh one after each use · old ones keep
+              working.
+            </p>
+          </>
+        ) : (
+          <p className="mt-1.5 bg-white/[0.03] px-3 py-3 text-[11px] leading-snug text-bone/35">
+            Not issued yet. Withdrawing from an exchange needs a public address
+            of your own, and this session holds one account rather than a
+            sequence. The payment link above works today and lands the money
+            straight in your balance.
+          </p>
+        )}
       </div>
     </Panel>
   );
@@ -139,10 +155,4 @@ function AddressBlock({ address }: { address: string }) {
   );
 }
 
-function SampleTag() {
-  return (
-    <span className="bg-white/[0.07] px-2 py-1 font-mono text-[9.5px] tracking-[0.2em] text-bone/55 uppercase">
-      Sample
-    </span>
-  );
-}
+

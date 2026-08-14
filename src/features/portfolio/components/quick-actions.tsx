@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
  *
  * - **Shield is not a button.** Public funds that land on a receive address are
  *   moved into the private balance automatically while a session is open, and
- *   the moment that happens is shown, not asked about. See `PREVIEW`.
+ *   the moment that happens is shown, not asked about.
  * - **Withdraw is not a button.** Sending to a plain `0x` address IS the
  *   withdrawal, the way sending to a transparent address is in every Zcash
  *   wallet. The send flow owns the moment that needs explaining, at the moment

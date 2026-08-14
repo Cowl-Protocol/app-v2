@@ -6,10 +6,17 @@
  * is here rather than in `shielded` because it is a rendering decision: what a
  * row is called when nothing will name it is a question about this panel.
  */
+import type { Prices } from "@/lib/price";
 import type { Holding } from "@/features/shielded";
 import type { Asset } from "../types";
 
-export function toAssets(holdings: Holding[]): Asset[] {
+/**
+ * `prices` is keyed by the pool's token id and never by ticker, which is the
+ * one detail here that is about money rather than about layout. An ERC-20
+ * chooses its own symbol, so a token calling itself USDG would be handed a
+ * dollar each by a table keyed on what it calls itself.
+ */
+export function toAssets(holdings: Holding[], prices: Prices): Asset[] {
   return holdings.map((h) => {
     if (h.meta) {
       return {
@@ -18,12 +25,13 @@ export function toAssets(holdings: Holding[]): Asset[] {
         decimals: h.meta.decimals,
         balance: h.amount,
         /**
-         * **No price, and no invented one.** There is no price source in this
-         * app yet, and a number in this column decides what the total above it
-         * says. `null` renders as no valuation, which is the honest state, and
-         * the alternative is a portfolio figure nobody can source.
+         * **The venue's own quote, or nothing.** `lib/price.ts` prices the
+         * curated registry from the pools a trade would execute against, and a
+         * token it will not quote comes back absent rather than guessed at.
+         * `null` renders as no valuation, and the total above these rows is
+         * summed from the same table, so the two cannot disagree.
          */
-        price: null,
+        price: prices.get(h.token) ?? null,
         logoURI: h.meta.logoURI,
       };
     }
@@ -43,6 +51,8 @@ export function toAssets(holdings: Holding[]): Asset[] {
       name: "Unnamed token",
       decimals: 0,
       balance: h.amount,
+      /* Unnameable and therefore unpriceable: without decimals there is no
+         whole unit for a price to be per. */
       price: null,
     };
   });

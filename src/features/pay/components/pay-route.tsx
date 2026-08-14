@@ -2,9 +2,8 @@
 
 import { useSyncExternalStore } from "react";
 import { decodeRequest } from "@/lib/request-link";
-import { IS_PLACEHOLDER, SAMPLE_REQUEST } from "../lib/placeholder";
 import { resolveRequest } from "../lib/resolve";
-import { PayRefused, PayScreen } from "./pay-screen";
+import { PayNeedsLink, PayRefused, PayScreen } from "./pay-screen";
 
 /**
  * Reads the request out of the URL and renders one of three things.
@@ -22,10 +21,12 @@ import { PayRefused, PayScreen } from "./pay-screen";
  * empty string, which is also the honest answer: before hydration, this page
  * genuinely does not know which request it is.
  *
- * **No payload is not a refusal.** Somebody who typed the address by hand has
- * not done anything wrong, so while the placeholder exists they get a sample,
- * labelled as one. Wired, that arm becomes a short "this page needs a payment
- * link" and the sample goes with the module it came from.
+ * **No payload is not a refusal, and it is no longer a sample either.** Somebody
+ * who typed the address by hand has not done anything wrong; they are simply on
+ * a page that needs a link, and it says so in a sentence. The sample request
+ * that used to fill this arm was a payable `zcowl1…` built from a fixed phrase,
+ * on a screen carrying a Pay button, which is a sample that eventually gets
+ * paid.
  */
 
 function subscribe(onChange: () => void) {
@@ -41,9 +42,14 @@ const noHash = () => "";
 export function PayRoute() {
   const hash = useSyncExternalStore(subscribe, readHash, noHash);
 
-  const decoded = decodeRequest(hash);
-  const sample = !decoded && IS_PLACEHOLDER;
-  const payload = decoded ?? SAMPLE_REQUEST;
+  const payload = decodeRequest(hash);
+
+  /*
+    Nothing in the fragment. Before hydration that is also every render, which is
+    why this is a plain sentence and not a warning: the page has not decided
+    anything is wrong, it just has nothing to show yet.
+  */
+  if (!payload) return <PayNeedsLink />;
 
   /*
     Resolution is separate from decoding, and both have to pass before an amount
@@ -56,5 +62,5 @@ export function PayRoute() {
   const resolved = resolveRequest(payload);
   if (typeof resolved === "string") return <PayRefused reason={resolved} />;
 
-  return <PayScreen request={resolved} sample={sample} />;
+  return <PayScreen request={resolved} />;
 }

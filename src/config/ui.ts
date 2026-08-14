@@ -43,6 +43,11 @@ export const SHOW_PRELOADER = true;
  * figures. Useful for layout, indistinguishable from a real session at a glance,
  * and one commit away from shipping.
  *
+ * What it shows changed when the placeholders went. A bypassed session has no
+ * keys, so there is no book to scan and no address to derive, and every screen
+ * behind it renders its empty state rather than invented money. Still useful for
+ * spacing and type, useless for looking at a screen with figures on it.
+ *
  * So it is no longer only a warning. `assertNoSkipInConfiguredBuild` below turns
  * it into a build failure the moment a build has the ids that let it sign
  * somebody in for real, which is the only case where leaving it on could reach a
@@ -70,22 +75,16 @@ function assertNoSkipInConfiguredBuild(): void {
 assertNoSkipInConfiguredBuild();
 
 /**
- * Render a state that is otherwise only reachable by doing something the app
- * cannot do yet.
+ * **`PREVIEW` used to live here and is gone with the placeholder modules.**
  *
- * `"paid"` shows the Receive panel at the moment a payment lands: the arrival,
- * and the fresh address that replaces the one just used. `"arriving"` shows the
- * home screen while the session's automatic move of public funds is in flight:
- * something landed on a funnel address and is being added to the balance. Both
- * last a few seconds in real use and would otherwise be undesignable.
+ * It rendered two states that were otherwise unreachable: the Receive panel at
+ * the moment a payment lands, and the home screen while arrived public funds
+ * were being moved into the balance. Both needed invented figures to draw, and
+ * both described machinery that does not exist yet · address rotation and the
+ * automatic move off a funnel. The switch was harmless while nothing was wired
+ * and was exactly the shape of the constant that is still sitting there when
+ * something is, which is the note it carried about itself.
  *
- * The payer's screen used to be here too. It is a route now, `/pay`, so it is
- * reachable by typing an address and needs no switch.
- *
- * **Leave it null.** Same reasoning as `SKIP_LOGIN`: harmless while nothing is
- * wired, and exactly the shape of the constant that is still sitting here when
- * something is.
+ * When those two flows ship, the states come back designed against the real
+ * thing rather than against a fixture.
  */
-export type Preview = null | "paid" | "arriving";
-
-export const PREVIEW: Preview = null;

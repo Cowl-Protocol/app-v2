@@ -24,15 +24,36 @@ import { ValueTrace } from "./value-trace";
  * short number is still legible from the shape of it, and it reaches the asset
  * rows too: hiding the total and leaving four amounts underneath that add up to
  * it would be theatre.
+ *
+ * **A missing dollar figure is a state, not a zero.** `total` is null on any
+ * chain whose venue will not price what is held, which is every test chain by
+ * design. Rendering `$0.00` there would say the account is empty when the rows
+ * underneath it plainly are not, so the figure gives way to the reason in words
+ * and the holdings below go on being the truth of the panel.
+ *
+ * **The change and the line come and go together.** Both are read off `points`,
+ * which `lib/trace.ts` returns empty whenever it cannot rebuild the window
+ * honestly, so there is no arrangement in which a percentage appears over a
+ * chart that is not there or vice versa.
  */
 
 export function BalancePanel({
+  total,
   points,
+  unpricedNote,
+  reading = false,
   hidden,
   onToggleHidden,
   onAction,
 }: {
+  /** The dollar worth of everything priced, or null when nothing is. */
+  total: number | null;
+  /** Seven readings, or empty when the window cannot be rebuilt honestly. */
   points: TracePoint[];
+  /** Why there is no figure, in one sentence, when there is none. */
+  unpricedNote?: string;
+  /** A scan is in flight, so the absence of a number is not yet an answer. */
+  reading?: boolean;
   hidden: boolean;
   onToggleHidden: () => void;
   onAction?: (verb: Verb) => void;
@@ -60,21 +81,29 @@ export function BalancePanel({
       className="h-full min-w-0"
     >
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <p
-          className={cn(
-            "text-[42px] leading-none font-semibold tracking-[-0.025em] text-bone md:text-[52px]",
-            hidden && "select-none",
-          )}
-        >
-          {hidden ? "••••••" : formatUsd(last)}
-        </p>
+        {total === null ? (
+          <p className="text-[26px] leading-none font-medium tracking-[-0.02em] text-bone/45 md:text-[30px]">
+            {reading ? "Reading the chain" : "No dollar figure"}
+          </p>
+        ) : (
+          <p
+            className={cn(
+              "text-[42px] leading-none font-semibold tracking-[-0.025em] text-bone md:text-[52px]",
+              hidden && "select-none",
+            )}
+          >
+            {hidden ? "••••••" : formatUsd(total)}
+          </p>
+        )}
 
-        <p className="flex items-baseline gap-2 font-mono text-[11px]">
-          <span className={up ? "text-mark" : "text-bone/70"}>
-            {up ? "▲" : "▼"} {Math.abs(pct).toFixed(2)}%
-          </span>
-          <span className="text-bone/35">7 days</span>
-        </p>
+        {points.length > 0 && total !== null && (
+          <p className="flex items-baseline gap-2 font-mono text-[11px]">
+            <span className={up ? "text-mark" : "text-bone/70"}>
+              {up ? "▲" : "▼"} {Math.abs(pct).toFixed(2)}%
+            </span>
+            <span className="text-bone/35">7 days</span>
+          </p>
+        )}
       </div>
 
       {/*
@@ -85,9 +114,15 @@ export function BalancePanel({
         product is, and a consumer who has just signed in with Google has no use
         for a venue they cannot visit and no way to check anything we might claim
         about it. That belongs in the docs, for somebody who came looking.
+
+        When there is no figure the same line carries the reason instead. One
+        sentence in the same place, rather than a second paragraph appearing and
+        pushing the panel around.
       */}
       <p className="mt-2 text-[12px] text-bone/40">
-        Held privately. Only this browser can read it.
+        {total === null && unpricedNote
+          ? unpricedNote
+          : "Held privately. Only this browser can read it."}
       </p>
 
       {/*
@@ -96,9 +131,16 @@ export function BalancePanel({
         stretched. Absorbing it here means a taller chart rather than a gap
         between two things that were meant to sit together.
       */}
-      <div className="mt-5 max-h-[190px] min-h-[86px] flex-1">
-        <ValueTrace points={points} />
-      </div>
+      {/*
+        No line rather than a flat one when the window cannot be rebuilt. A
+        straight line across seven days is a claim that nothing moved, and it is
+        the one shape a reader would never question.
+      */}
+      {points.length > 0 && (
+        <div className="mt-5 max-h-[190px] min-h-[86px] flex-1">
+          <ValueTrace points={points} />
+        </div>
+      )}
 
       {/*
         Pinned to the bottom edge, level with the Receive panel's own last

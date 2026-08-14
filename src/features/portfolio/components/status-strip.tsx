@@ -13,19 +13,45 @@ import type { ClientStatus } from "../types";
  * where somebody arrives already wanting it.
  *
  * What is left are the two states that go wrong silently. A stale sync shows a
- * balance that is merely out of date, and a cold prover turns the first send of
- * a session into a minute of nothing visibly happening. Neither throws, so being
- * told is the only way anybody finds out.
+ * balance that is merely out of date, and a replay that lost a window shows one
+ * that is short. Neither throws, and neither looks like anything, so being told
+ * is the only way anybody finds out.
+ *
+ * **The second readout is the scan's own integrity check, which used to be
+ * performed and never shown.** `complete` means the tree rebuilt from the leaves
+ * that came back hashes to the root the pool itself reports, which is the whole
+ * balance verified against the contract rather than against our own arithmetic.
+ * `moved` is ordinary and settles itself. The other two are not ordinary, and
+ * they say so in the accent reserved for a refusal.
  */
 
+/**
+ * Consumer words for a protocol check. "Verified" is what `complete` means to
+ * the person reading it: the number above was checked against the contract's own
+ * root, not merely added up correctly.
+ */
+const INTEGRITY: Record<NonNullable<ClientStatus["integrity"]>, string> = {
+  complete: "verified",
+  moved: "rechecking",
+  mismatch: "does not match",
+  gap: "incomplete",
+};
+
 export function StatusStrip({ status }: { status: ClientStatus }) {
+  const integrity = status.integrity;
+  const wrong = integrity === "mismatch" || integrity === "gap";
+
   return (
     <div className="flex flex-wrap items-center gap-x-7 gap-y-3 bg-white/[0.02] px-4 py-3">
-      <Readout label="Updated">{status.synced}</Readout>
+      <Readout label="Updated">{status.synced ?? "reading"}</Readout>
 
-      <Readout label="Send">
-        <span className={status.readyToSend ? "text-mark" : "text-bone/50"}>
-          {status.readyToSend ? "ready" : "warming up"}
+      <Readout label="Balance">
+        <span
+          className={
+            wrong ? "text-danger" : integrity === "complete" ? "text-mark" : "text-bone/50"
+          }
+        >
+          {integrity ? INTEGRITY[integrity] : "reading"}
         </span>
       </Readout>
 
