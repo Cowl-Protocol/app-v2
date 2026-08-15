@@ -147,7 +147,7 @@ function usePrivySigner(): ShieldedSigner | null {
  */
 export function usePrivyWalletSession(): WalletSession {
   const { ready, authenticated, user, logout } = usePrivy();
-  const { initOAuth, loading } = useLoginWithOAuth();
+  const { initOAuth, loading, state: oauthState } = useLoginWithOAuth();
   const { wallets, ready: walletsReady } = useWallets();
   const { createWallet } = useCreateWallet();
   const signer = usePrivySigner();
@@ -262,12 +262,67 @@ export function usePrivyWalletSession(): WalletSession {
     if (provisionFailure) reportSignInFailure(provisionFailure);
   }, [provisionFailure]);
 
+  /**
+   * The OAuth flow's own verdict, which nothing here used to read.
+   *
+   * **`loading` is the wrong signal to sign in on, and reading it alone has now
+   * cost a session.** The hook reports a `state` machine beside it, and the
+   * return leg from Google runs inside the SDK on a page load nobody clicked:
+   * its effect completes the login and **swallows the rejection**, recording it
+   * only as `{status: "error"}` here. So a refused sign in leaves
+   * `authenticated` false with no exception raised anywhere, and a screen
+   * reading `loading` alone reports a flow that is going nowhere as one still in
+   * progress. Reading the status is what turns that back into a sentence.
+   */
+  const oauthProblem =
+    oauthState.status === "error"
+      ? new SignInError(
+          "Signing in with Google did not complete. Please try again.",
+          `provider reported an oauth failure: ${oauthState.error?.message ?? "no reason given"}`,
+        )
+      : null;
+
+  useEffect(() => {
+    if (oauthProblem) reportSignInFailure(oauthProblem);
+    /*
+      Keyed on the reason rather than the object · a new `SignInError` is built
+      on every render while the status stays "error", and depending on the
+      instance would report the same failure once per render.
+    */
+  }, [oauthProblem?.reason]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /*
     Ambiguity first: it is knowable during the render that detects it, while a
     provisioning failure is only knowable after a round trip, so reporting the
-    later one over the earlier would describe the second-best reason.
+    later one over the earlier would describe the second-best reason. The OAuth
+    verdict sits last because it describes a door that never opened, and both
+    the others describe a keyring behind one that did.
   */
-  const problem = ambiguity ?? provisionFailure?.message ?? null;
+  const problem = ambiguity ?? provisionFailure?.message ?? oauthProblem?.message ?? null;
+
+  /**
+   * What sign in is waiting for, said out loud, once per shape.
+   *
+   * **A wait with no anchor is indistinguishable on screen from a wait that is
+   * progressing**, and on 2026-08-15 that cost a whole session: a real user
+   * authenticated with Google, their keyring came back empty because the
+   * provider dashboard had wallet creation at login switched off, and the door
+   * sat on "Waiting for Google" with Google long finished. Every layer was
+   * behaving correctly and nothing anywhere named the missing piece.
+   *
+   * This is deliberately a report and not a refusal. The same shape is reached
+   * legitimately for a moment on every sign in while the keyring loads, so
+   * turning it into a screen would refuse a flow that was about to succeed ·
+   * what it must never do again is pass in silence.
+   */
+  const waiting = !signer && authenticated && !problem
+    ? `authenticated with no anchor yet · walletsReady=${walletsReady} ` +
+      `keyring: ${describeKeyring(wallets)}`
+    : null;
+
+  useEffect(() => {
+    if (waiting) console.warn(`[cowl] sign in waiting: ${waiting}`);
+  }, [waiting]);
 
   const begin = useCallback(async () => {
     await initOAuth({ provider: "google" });
