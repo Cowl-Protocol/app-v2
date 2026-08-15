@@ -85,6 +85,15 @@ export type SignIn = SignInState & {
   pending: boolean;
 };
 
+/**
+ * How many refused unlocks of one anchor before this stops asking.
+ *
+ * Three, because the failure worth retrying is a network blip and the one worth
+ * reporting repeats. Each attempt costs two signatures, so the ceiling is also
+ * what bounds a bad afternoon at six.
+ */
+const UNLOCK_ATTEMPTS = 3;
+
 export function useSignIn(): SignIn {
   const session = useWalletSession();
   const { ready, authenticated, email, signer, problem, begin: start, starting, end } = session;
@@ -105,6 +114,22 @@ export function useSignIn(): SignIn {
   const unlocked = useRef<string | null>(null);
 
   /**
+   * How many times unlocking this anchor has been refused.
+   *
+   * **The retry below is deliberate and it needs a floor, which it did not have
+   * on 2026-08-15 when a provider refusal turned into an endless loop.** Clearing
+   * the guard on failure is right · a refusal is usually the provider having a
+   * moment rather than the account being wrong. But an unlock signs twice, and a
+   * refusal that repeats forever signs forever, hides its own reason (each
+   * attempt clears the error the last one recorded) and renders as a door that
+   * is thinking rather than one that has stopped.
+   *
+   * Counted per anchor so that signing out, or an account whose keyring changed,
+   * starts again with a full allowance.
+   */
+  const refusals = useRef<{ anchor: string; count: number }>({ anchor: "", count: 0 });
+
+  /**
    * Everything after the redirect, which is where the real work is.
    *
    * It runs on a page load rather than on a click, so it has to be idempotent
@@ -115,6 +140,12 @@ export function useSignIn(): SignIn {
   useEffect(() => {
     if (!signer) return;
     if (unlocked.current === signer.anchorAddress) return;
+    if (
+      refusals.current.anchor === signer.anchorAddress &&
+      refusals.current.count >= UNLOCK_ATTEMPTS
+    ) {
+      return;
+    }
 
     let live = true;
     unlocked.current = signer.anchorAddress;
@@ -134,6 +165,10 @@ export function useSignIn(): SignIn {
           network blip.
         */
         unlocked.current = null;
+        refusals.current =
+          refusals.current.anchor === signer.anchorAddress
+            ? { anchor: signer.anchorAddress, count: refusals.current.count + 1 }
+            : { anchor: signer.anchorAddress, count: 1 };
         reportSignInFailure(err);
         setError(isSignInError(err) ? err.message : "Sign in failed. Please try again.");
       });
@@ -172,6 +207,7 @@ export function useSignIn(): SignIn {
    */
   const signOut = useCallback(() => {
     unlocked.current = null;
+    refusals.current = { anchor: "", count: 0 };
     setAccount(null);
     setError(null);
     void end();

@@ -69,7 +69,7 @@ import { describeKeyring, type KeyringWallet, walletAt } from "./select";
 function useKeyring(): { wallets: KeyringWallet[]; ready: boolean } {
   const { ready, user } = usePrivy();
 
-  const wallets = useMemo(
+  const read = useMemo(
     () =>
       (user?.linkedAccounts ?? [])
         .filter((account) => account.type === "wallet")
@@ -91,6 +91,28 @@ function useKeyring(): { wallets: KeyringWallet[]; ready: boolean } {
         })),
     [user],
   );
+
+  /**
+   * The same keyring must be the **same object** until its contents change.
+   *
+   * **This is not a performance note, it is what stops an unlock loop, and the
+   * first version of this function caused one.** `usePrivy()` hands back a fresh
+   * `user` on renders where nothing about the account moved, so a list rebuilt
+   * from it is a new array every time · which makes a new anchor, a new signer,
+   * and `sign-in.ts`'s unlock effect fire again on every render. That effect
+   * clears its own guard when an unlock fails so a transient failure stays
+   * recoverable, and the two together turn one refusal into an endless retry
+   * that signs twice per pass and never shows the reason, because each attempt
+   * clears the error the last one recorded.
+   *
+   * Keyed on what the keyring **is** rather than on the object it arrived in.
+   */
+  const key = read
+    .map((w) => `${w.walletClientType}@${String(w.walletIndex)}:${w.address}`)
+    .join("|");
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const wallets = useMemo(() => read, [key]);
 
   return useMemo(() => ({ wallets, ready }), [wallets, ready]);
 }
