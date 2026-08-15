@@ -30,11 +30,10 @@ import {
   useLoginWithOAuth,
   usePrivy,
   useSignMessage,
-  useWallets,
 } from "@privy-io/react-auth";
 import { reportSignInFailure, SignInError } from "../errors";
 import { ANCHOR_INDEX, type ShieldedSigner, type WalletSession } from "../signer";
-import { describeKeyring, walletAt } from "./select";
+import { describeKeyring, type KeyringWallet, walletAt } from "./select";
 
 /*
   `walletAt`, `isEmbedded` and the keyring description moved to `./select.ts` so
@@ -42,6 +41,59 @@ import { describeKeyring, walletAt } from "./select";
   them lives with them; the refusal they feed is still built here, because its
   wording is this adapter's to own.
 */
+
+/**
+ * The keyring as the provider **records** it, rather than as this browser
+ * happens to have connected it.
+ *
+ * **`useWallets()` was the wrong source and it cost the first live sign in.**
+ * That hook describes wallet *connections* in this tab, and its `ready` is tied
+ * to the connector layer: with `disableAllExternalWallets` on, which is this
+ * app's whole shape, **it never becomes true at all**. Measured both ways on
+ * 2026-08-15 · false forever with external wallets off, true within a second of
+ * boot with them on. Everything here was gated behind it, so the anchor was
+ * never looked up and the wallet that should have been created at first login
+ * was never created either. Nothing failed. It simply never ran, and the door
+ * sat on "Waiting for Google" with Google long finished.
+ *
+ * `user.linkedAccounts` is the provider's own record of the account, which is
+ * exactly the question being asked here: does this identity have a wallet at the
+ * anchor index. It arrives with the user, so it is ready when `usePrivy()` is,
+ * and it does not care what this browser has connected.
+ *
+ * **Re-enabling external wallets would also have turned the light green**, and
+ * that is the fix this file must not take: it would put an injected extension
+ * back in the candidate set that `walletAt` exists to refuse, weakening a
+ * deliberate constraint to make a symptom go away.
+ */
+function useKeyring(): { wallets: KeyringWallet[]; ready: boolean } {
+  const { ready, user } = usePrivy();
+
+  const wallets = useMemo(
+    () =>
+      (user?.linkedAccounts ?? [])
+        .filter((account) => account.type === "wallet")
+        .map((account) => ({
+          /*
+            A record with no client type is not one of the provider's own, so it
+            is named rather than defaulted · `isEmbedded` then refuses it, which
+            is the same answer an injected wallet gets and the right one.
+          */
+          walletClientType: account.walletClientType ?? "unreported",
+          address: account.address,
+          /*
+            Only HD wallets the provider holds carry an index, and the type says
+            so · read defensively rather than asserted, because `walletAt`
+            already refuses a wallet that reports none and that refusal is the
+            one worth keeping.
+          */
+          walletIndex: (account as { walletIndex?: number | null }).walletIndex,
+        })),
+    [user],
+  );
+
+  return useMemo(() => ({ wallets, ready }), [wallets, ready]);
+}
 
 /** The refusal an ambiguous keyring earns, in both halves. */
 function ambiguityError(index: number, count: number): SignInError {
@@ -61,7 +113,7 @@ function ambiguityError(index: number, count: number): SignInError {
  * three, and `sign-in.ts` is what turns waiting into a screen.
  */
 function usePrivySigner(): ShieldedSigner | null {
-  const { wallets, ready } = useWallets();
+  const { wallets, ready } = useKeyring();
   const { signMessage } = useSignMessage();
   const { createWallet } = useCreateWallet();
 
@@ -148,7 +200,7 @@ function usePrivySigner(): ShieldedSigner | null {
 export function usePrivyWalletSession(): WalletSession {
   const { ready, authenticated, user, logout } = usePrivy();
   const { initOAuth, loading, state: oauthState } = useLoginWithOAuth();
-  const { wallets, ready: walletsReady } = useWallets();
+  const { wallets, ready: walletsReady } = useKeyring();
   const { createWallet } = useCreateWallet();
   const signer = usePrivySigner();
 

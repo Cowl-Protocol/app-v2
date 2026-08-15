@@ -35,24 +35,6 @@ import { AUTH_CONFIGURED } from "@/config";
  * unfinished one. The form tag and its handler arrive with the email path.
  */
 
-function MailIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.6" className="size-[17px]">
-      <rect x="3" y="5.5" width="18" height="13" rx="2.5" stroke="currentColor" />
-      <path d="M4 7.5 12 13.2 20 7.5" stroke="currentColor" />
-    </svg>
-  );
-}
-
-function LockIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.6" className="size-[17px]">
-      <rect x="4.5" y="10.5" width="15" height="10" rx="2.5" stroke="currentColor" />
-      <path d="M8 10.5V7.75a4 4 0 1 1 8 0v2.75" stroke="currentColor" />
-    </svg>
-  );
-}
-
 function GoogleMark() {
   return (
     <svg viewBox="0 0 24 24" className="size-[18px]">
@@ -132,64 +114,22 @@ export function LoginCard({
       </p>
 
       {/*
-        Inert until the email path exists. `disabled` rather than hidden, because
-        the card was designed around this block and the shape of the door is part
-        of what tells a returning visitor they are in the right place.
+        **One door, and the card now says so by having only one.** The disabled
+        email and password block that used to sit here was carried through two
+        providers as a shape the mock had, and it was always due to come out when
+        auth was wired · it is out on the user's call. A field the product has no
+        concept of teaches the wrong thing about how the account works even
+        greyed out, and "Email sign in is not open yet" advertised a second door
+        that must never open: a second login method is a second and weaker way
+        into the same shielded account, and the weakest one sets the strength of
+        all of them.
+
+        Full width and labelled, rather than an icon in a row of providers. With
+        Google the only provider, a lone icon in a grid reads as buttons that
+        failed to render, and an unlabelled mark asks the visitor to recognise a
+        logo before they can act.
       */}
-      <div className="mt-6 space-y-3 opacity-45">
-        <Field icon={<MailIcon />}>
-          <input
-            type="email"
-            inputMode="email"
-            autoComplete="email"
-            placeholder="email address"
-            disabled
-            className="h-full w-full bg-transparent text-[14px] text-bone outline-none placeholder:text-bone/40"
-          />
-        </Field>
-
-        <Field icon={<LockIcon />}>
-          <input
-            type="password"
-            autoComplete="current-password"
-            placeholder="Password"
-            disabled
-            className="h-full w-full bg-transparent text-[14px] text-bone outline-none placeholder:text-bone/40"
-          />
-        </Field>
-      </div>
-
-      <button
-        type="button"
-        disabled
-        className="mt-5 h-11 w-full rounded-lg bg-primary text-[14px] font-medium text-on-primary opacity-45"
-      >
-        Login
-      </button>
-
-      <p className="mt-2 text-center text-[12px] text-bone/35">
-        Email sign in is not open yet. Use Google below.
-      </p>
-
-      <div className="my-5 flex items-center gap-4">
-        <span className="h-px flex-1 bg-white/[0.08]" />
-        <span className="text-[11px] tracking-[0.12em] text-bone/30">OR</span>
-        <span className="h-px flex-1 bg-white/[0.08]" />
-      </div>
-
-      {/*
-        Full width and labelled, rather than an icon in a row of providers.
-        With Google the only provider left, a lone icon in a grid reads as two
-        buttons that failed to render, and an unlabelled mark asks the visitor to
-        recognise a logo before they can act. This is also the path most people
-        arriving here will take, so it is sized like it.
-
-        The handler must reach `window.open` with no await in front of it, or
-        Safari blocks the popup and Chrome hides the mistake by keeping the click
-        alive for a few seconds. That constraint lives in `lib/sign-in.ts`, which
-        opens the window as its first statement; nothing on this card may add an
-        await ahead of the call.
-      */}
+      <div className="mt-7" />
       <button
         type="button"
         onClick={onGoogle}
@@ -234,15 +174,6 @@ export function LoginCard({
  * pair reads as one control, and the whole row is a label, so a tap anywhere
  * along it lands in the input instead of only on the text.
  */
-function Field({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <label className="flex h-11 items-center gap-2.5 rounded-lg bg-ink2 px-3.5 text-bone/40 ring-1 ring-white/[0.05] transition-colors focus-within:text-bone/60 focus-within:ring-white/[0.12]">
-      {icon}
-      {children}
-    </label>
-  );
-}
-
 /**
  * The faint dot field either side of the mark. Texture, nothing more.
  *
