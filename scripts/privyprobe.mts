@@ -251,24 +251,41 @@ async function rfc6979(): Promise<void> {
     The raw digest first, because it isolates the nonce. `secp256k1_sign` takes a
     digest and signs it, so a mismatch here is the nonce and nothing else · no
     prefix, no encoding, no hash function in the way.
-  */
-  const raw = await privy
-    .wallets()
-    .ethereum()
-    .signSecp256k1(imported.id, { params: { hash: RAW_DIGEST } });
 
-  const rawLocal = secp256k1.sign(hexToBytes(RAW_DIGEST.slice(2)), privateKey);
-  const rawParts = split(raw.signature);
-  check(
-    "a raw digest signature is byte identical to noble's RFC 6979",
-    rawParts.r === rawLocal.r.toString(16).padStart(64, "0") &&
-      rawParts.s === rawLocal.s.toString(16).padStart(64, "0"),
-    `Privy  r ${rawParts.r}\n          ` +
-      `        s ${rawParts.s}\n          ` +
-      `noble  r ${rawLocal.r.toString(16).padStart(64, "0")}\n          ` +
-      `        s ${rawLocal.s.toString(16).padStart(64, "0")}\n          ` +
-      `Deterministic but not RFC 6979 means this app forks from the dapp silently.`,
-  );
+    The endpoint may refuse. On 2026-08-15 it answered a bare 500 for every
+    wallet on this app, generated and imported alike, while `personal_sign`
+    worked throughout. A refusal here must not abort the run before the check
+    below, which subsumes this one: over the same digest, byte identical
+    signatures are one nonce. What a refusal costs is diagnosis only · if the
+    end to end check then fails, this is the probe that would have said whether
+    the nonce or the prefix was at fault, and that day it has to be retried.
+  */
+  try {
+    const raw = await privy
+      .wallets()
+      .ethereum()
+      .signSecp256k1(imported.id, { params: { hash: RAW_DIGEST } });
+
+    const rawLocal = secp256k1.sign(hexToBytes(RAW_DIGEST.slice(2)), privateKey);
+    const rawParts = split(raw.signature);
+    check(
+      "a raw digest signature is byte identical to noble's RFC 6979",
+      rawParts.r === rawLocal.r.toString(16).padStart(64, "0") &&
+        rawParts.s === rawLocal.s.toString(16).padStart(64, "0"),
+      `Privy  r ${rawParts.r}\n          ` +
+        `        s ${rawParts.s}\n          ` +
+        `noble  r ${rawLocal.r.toString(16).padStart(64, "0")}\n          ` +
+        `        s ${rawLocal.s.toString(16).padStart(64, "0")}\n          ` +
+        `Deterministic but not RFC 6979 means this app forks from the dapp silently.`,
+    );
+  } catch (refusal) {
+    console.log(
+      `  note  the endpoint refused secp256k1_sign · ${(refusal as Error).message.slice(0, 120)}\n` +
+        `        the end to end check below still answers the nonce question on its own ·\n` +
+        `        what is lost is only the isolation that separates a nonce fault from a\n` +
+        `        prefix fault, should that check ever fail`,
+    );
+  }
 
   /*
     Then the real path, end to end. This is the one the app actually walks:
